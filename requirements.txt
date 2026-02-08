@@ -1,0 +1,7 @@
+pandas
+APScheduler
+requests
+catboost
+python-telegram-bot
+dotenv
+sqlalchemy

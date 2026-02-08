@@ -1,0 +1,7 @@
+.env
+.venv
+.idea
+sqlalchemy_refactor_plan.md
+dataset
+notebooks
+__pycache__
