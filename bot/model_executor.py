@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 from db.database import engine, get_db
-from db.schema import EconomicNews, Prediction
+from db.models import EconomicNews, Prediction
 
 from catboost import CatBoostClassifier
 

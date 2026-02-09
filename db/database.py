@@ -5,8 +5,8 @@ from sqlalchemy.orm import sessionmaker
 from config import Config
 
 # Import all models to ensure they are registered
-from schema import Base
-from schema import EconomicNews, Prediction, UserSubscription
+from db.models import Base
+from db.models import TodayEconomicNews
 
 
 # Create engine with SQLite database

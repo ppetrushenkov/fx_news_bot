@@ -18,16 +18,18 @@ async def main():
     print("Scheduler started")
     
     # Start bot in a separate task
-    bot_task = asyncio.create_task(start_bot())
+    # bot_task = asyncio.create_task(start_bot())
+    # try:
+    await start_bot()
     print("Bot started")
     
     # Keep the application running
-    try:
-        await bot_task
-    except KeyboardInterrupt:
-        print("Shutting down...")
-        scheduler.shutdown()
-        sys.exit(0)
+    # try:
+    #     await bot_task
+    # except KeyboardInterrupt:
+    #     print("Shutting down...")
+    #     scheduler.shutdown()
+    #     sys.exit(0)
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import sessionmaker
 
 from db.database import engine
-from db.schema import EconomicNews
+from db.models import EconomicNews
 from config import Config
 
 

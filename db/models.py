@@ -22,6 +22,23 @@ class EconomicNews(Base):
     custom_event_time = Column(String)
     created_at = Column(DateTime, default=func.now())
 
+class TodayEconomicNews(Base):
+    __tablename__ = 'today_economic_news'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    date = Column(String, nullable=False)
+    currency = Column(String)
+    importance = Column(Integer)
+    title = Column(String)
+    indicator = Column(String)
+    country = Column(String)
+    category = Column(String)
+    event_type = Column(String)
+    is_key_event = Column(Boolean)
+    event_weight = Column(Integer)
+    custom_event_time = Column(String)
+    created_at = Column(DateTime, default=func.now())
+
 class Prices(Base):
     __tablename__ = 'prices'
     

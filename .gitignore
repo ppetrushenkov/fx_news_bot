@@ -5,3 +5,4 @@ sqlalchemy_refactor_plan.md
 dataset
 notebooks
 __pycache__
+forex_news_bot.db
