@@ -6,3 +6,4 @@ dataset
 notebooks
 __pycache__
 forex_news_bot.db
+app_ptb.py
