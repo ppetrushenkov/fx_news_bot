@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import sessionmaker
 
 from db.database import engine
-from db.models import EconomicNews
+from db.models import TodayEconomicNews
 from config import Config
 
 
@@ -46,6 +46,7 @@ def fetch_economic_news():
 def populate_database():
     """Populate database with daily economic news."""
     news_df = fetch_economic_news()
+    # TODO: transform date to GMT +3
     
     if not news_df.empty:
         # Create database session
@@ -53,13 +54,13 @@ def populate_database():
         
         try:
             # Process news data and insert into database
-            # TODO: Check Pandas version `to_sql()`
-            news_df.to_sql(EconomicNews.__tablename__, db.bind, if_exists='append', index=False)
+            news_df.to_sql(TodayEconomicNews.__tablename__, db.bind, if_exists='append', index=False)
             print(f"Added {len(news_df)} news items to database")
 
         except Exception as e:
             print(f"Error populating database: {e}")
             db.rollback()
+        
         finally:
             db.close()
 

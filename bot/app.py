@@ -1,6 +1,18 @@
 from config import Config
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
+from db.database import get_db
+from db.models import TodayEconomicNews
+import pandas as pd
+import logging
+
+
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 
 bot = Bot(token=Config.TELEGRAM_TOKEN)
@@ -26,6 +38,29 @@ async def help(message: types.Message):
         '/daily_summary - Show daily market summary for today\n'
     )
 
+@dp.message(Command('daily_summary'))
+async def daily_summary(message: types.Message):
+    db = next(get_db())
+    try:
+        # Query all records from TodayEconomicNews table
+        query = db.query(TodayEconomicNews)
+        df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
+        current_date = df.date.dt.date.iloc[0]
+        high_impact_events_count = df[df['importance'] == 1].shape[0]
+        high_impact_events = df[df['importance'] == 1]['title'].tolist()
+            
+        if df.shape[0] > 0:
+            daily_summary = \
+            f'Daily market summary for {current_date}: \n' \
+            f'High impact events count: {high_impact_events_count} \n' \
+            f'High impact events: {'\n -'.join([' '] + high_impact_events)}' 
+            await message.answer(daily_summary)
+        else:
+            await message.answer('No daily summary found.')
+    
+    except Exception as e:
+        logger.error(f"Error in daily_summary command: {e}")
+        await message.answer('An error occurred while getting daily summary.')
 
 @dp.message()
 async def echo(message: types.Message):
@@ -34,7 +69,7 @@ async def echo(message: types.Message):
 
 async def main():
     print('Telegram bot started')
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == '__main__':
