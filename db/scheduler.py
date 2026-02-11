@@ -76,3 +76,13 @@ def set_multi_hour_scheduler_for_a_day():
     df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
     unique_dates_shifted = shift_dates_back_by_delta(df['date'])
     times = shift_dates_back_by_delta(unique_dates_shifted)
+
+    multi_hour_scheduler = AsyncIOScheduler()
+    for time in times:
+        multi_hour_scheduler.add_job(
+            scheduled_population,
+            CronTrigger(hour=time.hour, minute=time.minute),
+            run_date=time.date,
+            id=f'daily_news_population_{time.strftime("%H:%M")}'
+        )
+    multi_hour_scheduler.start()
