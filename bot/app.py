@@ -45,11 +45,13 @@ async def daily_summary(message: types.Message):
         # Query all records from TodayEconomicNews table
         query = db.query(TodayEconomicNews)
         df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
-        current_date = df.date.dt.date.iloc[0]
-        high_impact_events_count = df[df['importance'] == 1].shape[0]
-        high_impact_events = df[df['importance'] == 1]['title'].tolist()
+        
+        # If dataframe is not empty -> form the summary
+        if not df.empty:
+            current_date = df.date.dt.date.iloc[0]
+            high_impact_events_count = df[df['importance'] == 1].shape[0]
+            high_impact_events = df[df['importance'] == 1]['title'].tolist()
             
-        if df.shape[0] > 0:
             daily_summary = \
             f'Daily market summary for {current_date}: \n' \
             f'High impact events count: {high_impact_events_count} \n' \
