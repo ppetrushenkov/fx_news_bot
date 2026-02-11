@@ -1,52 +1,26 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-import asyncio
-import requests
-import pandas as pd
-
-from datetime import datetime, timedelta
-
 from sqlalchemy.orm import sessionmaker
 
 from db.database import engine
 from db.models import TodayEconomicNews
+from db.utils import convert_tz_to_moscow, fetch_economic_news
+
 from config import Config
+
+import asyncio
 
 
 # Create session factory for scheduler
 SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def fetch_economic_news():
-    """Fetch economic news for the current day."""
-    countries = ['US', 'FR', 'GB', 'EU', 'AU', 'DE', 'JP']  # TODO: add more countries
-    today = datetime.now().strftime('%Y-%m-%d')
-    tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-    
-    url = 'https://economic-calendar.tradingview.com/events'
-    headers = {'Origin': 'https://in.tradingview.com'}
-    payload = {
-        'from': f'{today}T00:00:00.000Z',
-        'to': f'{tomorrow}T00:00:00.000Z',
-        'countries': ','.join(countries)
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, params=payload)
-        data = response.json()
-        news_df = pd.DataFrame(data['result'])
-        return news_df
-    
-    except Exception as e:
-        print(f"Error fetching news: {e}")
-        return pd.DataFrame()
-
-
 def populate_database():
     """Populate database with daily economic news."""
     news_df = fetch_economic_news()
-    # TODO: transform date to GMT +3
+    news_df['date'] = convert_tz_to_moscow(news_df['date'])
+    news_df.sort_values('date', inplace=True)
     
     if not news_df.empty:
         # Create database session
