@@ -3,17 +3,25 @@ from apscheduler.triggers.cron import CronTrigger
 
 from sqlalchemy.orm import sessionmaker
 
-from db.database import engine
+from db.database import engine, get_db
 from db.models import TodayEconomicNews
-from db.utils import convert_tz_to_moscow, fetch_economic_news
+from db.utils import convert_tz_to_moscow, fetch_economic_news, custom_datetime_crop_to_closest_half_hour
 
 from config import Config
 
 import asyncio
+import pandas as pd
 
 
 # Create session factory for scheduler
 SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+
+def shift_dates_back_by_delta(event_times: pd.Series, delta: str = '30min') -> pd.Series:
+    crop_dates = event_times.apply(custom_datetime_crop_to_closest_half_hour)
+    unique_dates = crop_dates.unique()
+    unique_dates_shifted = unique_dates - pd.Timedelta(delta)
+    return unique_dates_shifted
 
 
 def populate_database():
@@ -58,3 +66,13 @@ def setup_scheduler():
     
     scheduler.start()
     return scheduler
+
+
+def set_multi_hour_scheduler_for_a_day():
+    """Sets and start the scheduler for the current day.
+    """
+    db = next(get_db())
+    query = db.query(TodayEconomicNews)
+    df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
+    unique_dates_shifted = shift_dates_back_by_delta(df['date'])
+    times = shift_dates_back_by_delta(unique_dates_shifted)

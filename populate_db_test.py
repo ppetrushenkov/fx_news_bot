@@ -6,30 +6,29 @@ import pandas as pd
 
 db = next(get_db())
 
+def custom_datetime_crop_to_closest_half_hour(dtime: pd.Series):
+    dtime = pd.to_datetime(dtime)
+    minutes = dtime.minute
+    
+    if (59 >= minutes >= 45) or (29 >= minutes >= 15):
+        return dtime.ceil('30min')
+    else:
+        return dtime.floor('30min')
+    
 
-def convert_tz_to_moscow(dt: pd.Series):
-    return pd.to_datetime(dt).dt.tz_convert('Europe/Moscow')
-
+def get_times_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
+    crop_dates = event_times.apply(custom_datetime_crop_to_closest_half_hour)
+    unique_dates = crop_dates.unique()
+    unique_dates_shifted = unique_dates - pd.Timedelta(delta)
+    return unique_dates_shifted
+    
 
 def main():
-    # create_tables()
-    # populate_database()
-    
+    """Fetch unique times for today's news"""
     query = db.query(TodayEconomicNews)
     df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
-    df.sort_values('date', inplace=True)
-    print(df[['title', 'date']].head(25))
-        
-    # if not df.empty:
-    #     current_date = df.date.dt.date.iloc[0]
-    #     high_impact_events_count = df[df['importance'] == 1].shape[0]
-    #     high_impact_events = df[df['importance'] == 1]['title'].tolist()
-
-    #     daily_summary = \
-    #     f'Daily market summary for {current_date}: \n' \
-    #     f'High impact events count: {high_impact_events_count} \n' \
-    #     f'High impact events: {'\n -'.join([' '] + high_impact_events)}' 
-    #     print(daily_summary)
+    unique_dates_shifted = get_times_to_set_scheduler(df['date'])
+    print(unique_dates_shifted)
 
 if __name__ == '__main__':
     main()

@@ -7,6 +7,16 @@ def convert_tz_to_moscow(dt: pd.Series):
     return pd.to_datetime(dt).dt.tz_convert('Europe/Moscow')
 
 
+def custom_datetime_crop_to_closest_half_hour(dtime: pd.Series):
+    dtime = pd.to_datetime(dtime)
+    minutes = dtime.minute
+    
+    if (59 >= minutes >= 45) or (29 >= minutes >= 15):
+        return dtime.ceil('30min')
+    else:
+        return dtime.floor('30min')
+
+
 def fetch_economic_news(delta: int = 1) -> pd.DataFrame:
     """
     Fetch economic news for the current day from the TradingView economic calendar.
