@@ -36,7 +36,11 @@ async def help(message: types.Message):
         '/subscribe - Subscribe to alerts\n'
         '/unsubscribe - Unsubscribe from alerts\n'
         '/daily_summary - Show daily market summary for today\n'
+        '/set_daily_summary_time - Set the time, when the bot will send you a summary'
     )
+
+# TODO: add subscribe and unsubscribe button
+# TODO: add the function of setting time for daily summary in subscribe function
 
 @dp.message(Command('daily_summary'))
 async def daily_summary(message: types.Message):
