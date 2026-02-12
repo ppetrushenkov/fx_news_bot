@@ -17,7 +17,18 @@ import pandas as pd
 SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     
 
-def shift_dates_back_by_delta(event_times: pd.Series, delta: str = '30min') -> pd.Series:
+def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
+    """
+    Takes the raw datetime column from TodayEconomicNews table
+    and return the list of unique datetime values, when the events comes out.
+    
+    :param event_times: Pandas datetime column from TodayEconomicNews table
+    :type event_times: pd.Series
+    :param delta: The value that the datetime will move back to
+    :type delta: str
+    :return: The pd.Series of datetime values, shifted back on `delta` value
+    :rtype: Series[Any]
+    """
     crop_dates = event_times.apply(custom_datetime_crop_to_closest_half_hour)
     unique_dates = crop_dates.unique()
     unique_dates_shifted = unique_dates - pd.Timedelta(delta)
@@ -74,8 +85,7 @@ def set_multi_hour_scheduler_for_a_day():
     db = next(get_db())
     query = db.query(TodayEconomicNews)
     df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
-    unique_dates_shifted = shift_dates_back_by_delta(df['date'])
-    times = shift_dates_back_by_delta(unique_dates_shifted)
+    times = get_datetime_list_to_set_scheduler(df['date'])
 
     multi_hour_scheduler = AsyncIOScheduler()
     for time in times:
