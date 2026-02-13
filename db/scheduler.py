@@ -4,6 +4,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import sessionmaker
 
 from db.database import engine, get_db
+from db.handlers import DataRetriever
 from db.models import TodayEconomicNews
 from db.utils import convert_tz_to_moscow, fetch_economic_news, custom_datetime_crop_to_closest_half_hour
 
@@ -20,7 +21,8 @@ SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
     """
     Takes the raw datetime column from TodayEconomicNews table
-    and return the list of unique datetime values, when the events comes out.
+    and return the list of unique datetime values, when the events comes out
+    and shift it on `delta` back.
     
     :param event_times: Pandas datetime column from TodayEconomicNews table
     :type event_times: pd.Series
@@ -64,6 +66,18 @@ async def scheduled_population():
     await loop.run_in_executor(None, populate_database)
 
 
+async def check_the_market():
+    """Async function to check the market when the news are coming.
+    If there is some trigger alert, the bot notify you about it."""
+    data_retriever = DataRetriever()
+    predictions = data_retriever.check_the_market()
+    
+    if len(predictions) > 0:
+        # TODO: make TG bot support to write if the market may spread out.
+        # TODO: How to write message through telegram bot from here?
+        pass
+
+
 def setup_scheduler():
     """Setup and start the scheduler."""
     scheduler = AsyncIOScheduler()
@@ -80,19 +94,21 @@ def setup_scheduler():
 
 
 def set_multi_hour_scheduler_for_a_day():
-    """Sets and start the scheduler for the current day.
     """
-    db = next(get_db())
-    query = db.query(TodayEconomicNews)
-    df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
-    times = get_datetime_list_to_set_scheduler(df['date'])
+    Setup and start the scheduler on the specific times, right 30min (can be also set on 1hour)
+    before the event is out.
+    """
+    data_retriever = DataRetriever()
+    df = data_retriever.get_events_for_today()
+    times_before_events = get_datetime_list_to_set_scheduler(df['date'], delta='30min')
 
     multi_hour_scheduler = AsyncIOScheduler()
-    for time in times:
+    for time in times_before_events:
         multi_hour_scheduler.add_job(
-            scheduled_population,
+            check_the_market,
             CronTrigger(hour=time.hour, minute=time.minute),
             run_date=time.date,
-            id=f'daily_news_population_{time.strftime("%H:%M")}'
+            id=f'daily_news_population_{time.strftime("%H:%M")}'  # TODO: Change on unix timestamp
         )
     multi_hour_scheduler.start()
+    return multi_hour_scheduler
