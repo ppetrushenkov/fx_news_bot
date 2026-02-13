@@ -73,6 +73,10 @@ async def echo(message: types.Message):
     await message.answer(message.text)
 
 
+async def monitoring_the_market():
+    pass
+
+
 async def main():
     print('Telegram bot started')
     await dp.start_polling(bot, skip_updates=True)
