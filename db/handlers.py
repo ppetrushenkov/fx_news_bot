@@ -1,6 +1,9 @@
 from config import Config
 from db.database import get_db
 from db.models import TodayEconomicNews, Base
+
+from twelvedata import TDClient
+
 import pandas as pd
 
 
@@ -15,6 +18,8 @@ class DataRetriever:
     def __init__(self, aggregation_time: str = '30min'):
         self.db = next(get_db)
         self.aggregation_time = aggregation_time
+        self.td = TDClient(apikey=Config.TWELVE_API)
+        self.supported_tickers = ['EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCAD', 'AUDUSD', 'NZDUSD']
 
     def select_all_to_df(self, db_model) -> pd.DataFrame:
         query = self.db.query(db_model)
@@ -35,8 +40,15 @@ class DataRetriever:
         return aggregated_news
 
     def get_last_prices(self) -> pd.DataFrame:
-        # TODO: Add Twelve Data support retrieving
-        prices = None
+        ts = self.td.time_series(
+            symbol=self.supported_tickers,
+            interval="30min",
+            outputsize=15
+        )
+        # Returns pandas.DataFrame
+        prices = ts.as_pandas()
+        prices.reset_index(inplace=True)
+        prices.columns = ['ticker', 'datetime', 'open', 'high', 'low', 'close']
         return prices
 
     def unite_events_and_prices(self):
