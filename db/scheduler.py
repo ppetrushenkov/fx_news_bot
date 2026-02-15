@@ -13,6 +13,8 @@ from config import Config
 import asyncio
 import pandas as pd
 
+from time import time
+
 
 # Create session factory for scheduler
 SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -103,12 +105,12 @@ def set_multi_hour_scheduler_for_a_day():
     times_before_events = get_datetime_list_to_set_scheduler(df['date'], delta='30min')
 
     multi_hour_scheduler = AsyncIOScheduler()
-    for time in times_before_events:
+    for sch_time in times_before_events:
         multi_hour_scheduler.add_job(
             check_the_market,
-            CronTrigger(hour=time.hour, minute=time.minute),
-            run_date=time.date,
-            id=f'daily_news_population_{time.strftime("%H:%M")}'  # TODO: Change on unix timestamp
+            CronTrigger(hour=sch_time.hour, minute=sch_time.minute),
+            run_date=sch_time.date,
+            id=f'daily_news_population_{str(int(time()))}'
         )
     multi_hour_scheduler.start()
     return multi_hour_scheduler
