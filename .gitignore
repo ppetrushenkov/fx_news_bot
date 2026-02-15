@@ -3,7 +3,10 @@
 .idea
 sqlalchemy_refactor_plan.md
 dataset
-notebooks
 __pycache__
 forex_news_bot.db
 app_ptb.py
+catboost_info
+mlruns
+mlflow.db
+economic_news.db
