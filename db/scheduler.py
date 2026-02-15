@@ -1,7 +1,9 @@
+from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import func, select
 
 from db.database import engine, get_db
 from db.handlers import DataRetriever
@@ -18,6 +20,7 @@ from time import time
 
 # Create session factory for scheduler
 SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+session = SchedulerSession()
     
 
 def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
@@ -41,25 +44,32 @@ def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30m
 
 def populate_database():
     """Populate database with daily economic news."""
+    # Check the last data in the TodayEconomicNews
+    min_date_query = select(func.min(TodayEconomicNews.date))
+    min_date = session.execute(min_date_query).scalars().all()[0]
+    min_date = pd.to_datetime(min_date).date()
+    current_date = datetime.now().date()
+
+    if min_date == current_date:
+        print("There is no need to populate database yet")
+        return
+
     news_df = fetch_economic_news()
     news_df['date'] = convert_tz_to_moscow(news_df['date'])
     news_df.sort_values('date', inplace=True)
     
     if not news_df.empty:
-        # Create database session
-        db = SchedulerSession()
-        
         try:
             # Process news data and insert into database
-            news_df.to_sql(TodayEconomicNews.__tablename__, db.bind, if_exists='append', index=False)
+            news_df.to_sql(TodayEconomicNews.__tablename__, session.bind, if_exists='replace', index=False)
             print(f"Added {len(news_df)} news items to database")
 
         except Exception as e:
             print(f"Error populating database: {e}")
-            db.rollback()
+            session.rollback()
         
         finally:
-            db.close()
+            session.close()
 
 
 async def scheduled_population():
