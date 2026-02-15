@@ -1,11 +1,6 @@
 import numpy as np
 import pandas as pd
 import talib as ta
-from hurst import compute_Hc
-from tqdm.auto import tqdm
-
-tqdm.pandas(desc="Processing DataFrame")
-
 
 
 def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
@@ -55,17 +50,6 @@ def calculate_bb_width(data: pd.DataFrame, window: int):
 
 def normalized_bb_width(bb_width, atr):
     return bb_width / atr
-
-
-
-def rolling_hurst(series: pd.Series, window=100):
-    def get_h(sub_series):
-        if len(sub_series) < 50:
-            return np.nan
-        H, _, _ = compute_Hc(sub_series, kind='price', simplified=True)
-        return H
-    
-    return series.rolling(window=window).progress_apply(get_h, raw=False)
 
 
 def calculate_chaos_features(data: pd.DataFrame, window: int = 14):

@@ -1,10 +1,13 @@
 from config import Config
+
 from db.database import get_db
 from db.models import TodayEconomicNews, Base
+from db.utils import custom_datetime_crop
 
 from twelvedata import TDClient
 
 import pandas as pd
+
 
 
 class DataRetriever:
@@ -41,7 +44,7 @@ class DataRetriever:
     def get_aggregated_events_for_now(self, event_time: str) -> pd.DataFrame:
         # TODO: Write aggregation function
         events_today = self.get_events_for_today()  # May be take whole dataset, not just today
-        events_today['cropped_datetime'] = self._custom_datetime_crop(events_today['date'])
+        events_today['cropped_datetime'] = custom_datetime_crop(events_today['date'])
         
         upcoming_events = events_today[events_today['cropped_datetime'] == event_time]
         
@@ -49,7 +52,8 @@ class DataRetriever:
         return aggregated_news
 
     def get_last_prices(self) -> pd.DataFrame:
-        """Get last prices for supported tickers."""
+        """Fetch last prices for supported tickers from Twelve Data source"""
+        # TODO: Define, how may outputsize do I need for predictions
         ts = self.td.time_series(
             symbol=self.supported_tickers,
             interval="30min",
@@ -99,25 +103,6 @@ class DataRetriever:
                 'Chaos probability': is_chaos_prediction
             })
         return predictions
-
-    def _convert_tz_to_moscow(self, dt: pd.Series):
-        return pd.to_datetime(dt).dt.tz_convert('Europe/Moscow')
-
-    def _custom_datetime_crop(self, dtime: pd.Series):
-        dtime = pd.to_datetime(dtime)
-        minutes = dtime.minute
-
-        if self.aggregation_time == '30min':
-            if (59 >= minutes >= 45) or (29 >= minutes >= 15):
-                return dtime.ceil('30min')
-            else:
-                return dtime.floor('30min')
-        elif self.aggregation_time == 'h':
-            if minutes >= 30:
-                return dtime.ceil(self.aggregation_time)
-            else:
-                return dtime.floor(self.aggregation_time)
-
 
 
 class Predictor:
