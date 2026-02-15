@@ -5,3 +5,4 @@ catboost
 aiogram
 python-dotenv
 sqlalchemy
+twelvedata
