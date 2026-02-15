@@ -2,7 +2,8 @@ from config import Config
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from db.database import get_db
-from db.models import TodayEconomicNews
+from db.models import TodayEconomicNews, UserSubscription
+from sqlalchemy.sql import func
 import pandas as pd
 import logging
 
@@ -39,7 +40,37 @@ async def help(message: types.Message):
         '/set_daily_summary_time - Set the time, when the bot will send you a summary'
     )
 
-# TODO: add subscribe and unsubscribe button
+@dp.message(Command('subscribe'))
+async def subscribe(message: types.Message):
+    try:
+        db = next(get_db())
+        db.add(
+            UserSubscription(
+                user_id=message.from_user.id,
+                chat_id=message.chat.id,
+                subscribed_to_alerts=True,
+                subscribed_to_daily_summary=True,
+                created_at=func.now()
+            )
+        )
+        db.commit()
+        await message.answer('You have successfully subscribed to alerts and daily summary.')
+    except Exception as e:
+        logger.error(f"Error in subscribe command: {e}")
+        await message.answer('An error occurred while subscribing.')
+
+
+@dp.message(Command('unsubscribe'))
+async def unsubscribe(message: types.Message):
+    try:
+        db = next(get_db())
+        db.query(UserSubscription).filter(UserSubscription.user_id == message.from_user.id).delete()
+        db.commit()
+        await message.answer('You have successfully unsubscribed from alerts and daily summary.')
+    except Exception as e:
+        logger.error(f"Error in unsubscribe command: {e}")
+        await message.answer('An error occurred while unsubscribing.')
+        
 # TODO: add the function of setting time for daily summary in subscribe function
 
 @dp.message(Command('daily_summary'))
@@ -67,6 +98,7 @@ async def daily_summary(message: types.Message):
     except Exception as e:
         logger.error(f"Error in daily_summary command: {e}")
         await message.answer('An error occurred while getting daily summary.')
+
 
 @dp.message()
 async def echo(message: types.Message):
