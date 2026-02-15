@@ -25,7 +25,17 @@ async def start(message: types.Message):
     user = message.from_user
     await message.answer(
             f'Hi {user.first_name}! Welcome to the Forex News Bot. '
-            'I will notify you about important economic events and market predictions.'
+            'I will notify you about important economic events and market predictions. \n'
+            '\n'
+            'To get started, use the /help command to see the list of available commands. \n'
+            '\n'
+            'Available commands:\n'
+            '/start - Start the bot\n'
+            '/help - Show this help message\n'
+            '/subscribe - Subscribe to alerts\n'
+            '/unsubscribe - Unsubscribe from alerts\n'
+            '/daily_summary - Show daily market summary for today\n'
+            '/set_daily_summary_time - Set the time, when the bot will send you a summary'
         )
     
 @dp.message(Command('help'))
@@ -75,12 +85,13 @@ async def unsubscribe(message: types.Message):
 
 @dp.message(Command('daily_summary'))
 async def daily_summary(message: types.Message):
+    print('[INFO] Running daily_summary command')
     db = next(get_db())
     try:
         # Query all records from TodayEconomicNews table
         query = db.query(TodayEconomicNews)
         df = pd.read_sql_query(query.statement, db.bind, params=query.statement.compile().params)
-        
+
         # If dataframe is not empty -> form the summary
         if not df.empty:
             current_date = df.date.dt.date.iloc[0]
