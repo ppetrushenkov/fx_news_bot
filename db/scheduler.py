@@ -57,6 +57,9 @@ def populate_database():
     news_df = fetch_economic_news()
     news_df['date'] = convert_tz_to_moscow(news_df['date'])
     news_df.sort_values('date', inplace=True)
+
+    if 'scale' not in news_df.columns:
+        news_df['scale'] = None
     
     if not news_df.empty:
         try:
