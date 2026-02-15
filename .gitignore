@@ -10,3 +10,5 @@ catboost_info
 mlruns
 mlflow.db
 economic_news.db
+try_twelve_data_copy.ipynb
+try_twelve_data.ipynb
