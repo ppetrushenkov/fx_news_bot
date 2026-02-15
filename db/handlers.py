@@ -22,10 +22,19 @@ class DataRetriever:
         self.supported_tickers = ['EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCAD', 'AUDUSD', 'NZDUSD']
 
     def select_all_to_df(self, db_model) -> pd.DataFrame:
+        """Select all records from the database and return them as a pandas DataFrame.
+
+        Args:
+            db_model (Base): The database model to select from.
+        
+        Returns:
+            pd.DataFrame: The selected records as a pandas DataFrame.
+        """
         query = self.db.query(db_model)
         return pd.read_sql_query(query.statement, self.db.bind, params=query.statement.compile().params)
 
     def get_events_for_today(self) -> pd.DataFrame:
+        """Get events for today."""
         events_today = self.select_all_to_df(TodayEconomicNews)
         return events_today
 
@@ -40,6 +49,7 @@ class DataRetriever:
         return aggregated_news
 
     def get_last_prices(self) -> pd.DataFrame:
+        """Get last prices for supported tickers."""
         ts = self.td.time_series(
             symbol=self.supported_tickers,
             interval="30min",
