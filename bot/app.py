@@ -47,12 +47,16 @@ async def help(message: types.Message):
         '/subscribe - Subscribe to alerts\n'
         '/unsubscribe - Unsubscribe from alerts\n'
         '/daily_summary - Show daily market summary for today\n'
+        '/settime - Set (or change) user timezone'
         '/set_daily_summary_time - Set the time, when the bot will send you a summary'
     )
 
 @dp.message(Command('subscribe'))
 async def subscribe(message: types.Message):
     try:
+        # Ask about user timezone
+        # TODO: Make bot ask about user timezone before inserting into subscription table
+        # Insert info about user into UserSubscription table
         db = next(get_db())
         db.add(
             UserSubscription(
