@@ -78,4 +78,5 @@ class UserSubscription(Base):
     chat_id = Column(Integer)
     subscribed_to_alerts = Column(Boolean, default=True)
     subscribed_to_daily_summary = Column(Boolean, default=False)
+    user_tz = Column(String)
     created_at = Column(DateTime, default=func.now())

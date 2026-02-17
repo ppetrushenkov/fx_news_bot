@@ -52,9 +52,7 @@ def fetch_economic_news_for_two_days() -> pd.DataFrame:
 
 def fetch_economic_news_for_a_week() -> pd.DataFrame:
     return fetch_economic_news(5)
-    
-def convert_tz_to_moscow(dt: pd.Series):
-    return pd.to_datetime(dt).dt.tz_convert('Europe/Moscow')
+
 
 def custom_datetime_crop(self, dtime: pd.Series):
     dtime = pd.to_datetime(dtime)
@@ -65,7 +63,7 @@ def custom_datetime_crop(self, dtime: pd.Series):
             return dtime.ceil('30min')
         else:
             return dtime.floor('30min')
-    elif self.aggregation_time == 'h':
+    elif self.aggregation_time in ['1h', 'h']:
         if minutes >= 30:
             return dtime.ceil(self.aggregation_time)
         else:
