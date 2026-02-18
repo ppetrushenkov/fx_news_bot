@@ -4,7 +4,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from sqlalchemy.orm import sessionmaker
+# from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 
 from db.database import SessionLocal
@@ -18,6 +18,7 @@ from utils import (convert_tz_to_moscow,
                    )
 
 from config import Config
+from app import bot, dp
 
 import asyncio
 import pandas as pd
