@@ -1,7 +1,7 @@
 from config import Config
 
-from db.database import get_db
-from db.models import TodayEconomicNews, Base
+from db.database import SessionLocal
+from db.models import TodayEconomicNews
 from bot.utils import custom_datetime_crop
 
 from twelvedata import TDClient
@@ -19,20 +19,14 @@ class DataRetriever:
     - fetch prices from different sources (TwelveData and maybe more);
     """
     def __init__(self, aggregation_time: str = '30min'):
-        self.db = next(get_db)
-        self.aggregation_time = aggregation_time
+        # self.db = next(get_db)  # TODO: Remove this line if the line below works
+        self.db = SessionLocal()
         self.td = TDClient(apikey=Config.TWELVE_API)
         self.supported_tickers = ['EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCAD', 'AUDUSD', 'NZDUSD']
+        self.aggregation_time = aggregation_time
 
     def select_all_to_df(self, db_model) -> pd.DataFrame:
-        """Select all records from the database and return them as a pandas DataFrame.
-
-        Args:
-            db_model (Base): The database model to select from.
-        
-        Returns:
-            pd.DataFrame: The selected records as a pandas DataFrame.
-        """
+        """Select all records from the database and return them as a pandas DataFrame."""
         query = self.db.query(db_model)
         return pd.read_sql_query(query.statement, self.db.bind, params=query.statement.compile().params)
 
