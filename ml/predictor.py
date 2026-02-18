@@ -1,20 +1,20 @@
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
 
-from sqlalchemy.orm import sessionmaker
-from db.database import engine, get_db
-from db.models import EconomicNews, Prediction
+from db.database import SessionLocal
+from db.models import TodayEconomicNews, Prediction
 
 from catboost import CatBoostClassifier, CatBoostRegressor
 
 from config import Config
 
+import pandas as pd
+import numpy as np
+
 # Create session factory for model executor
-ModelSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# ModelSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-class NewsPredictor:
+class VolatilityPredictor:
     def __init__(self, 
                  volatility_model_path=None,
                  range_model_path=None,
@@ -69,7 +69,7 @@ class NewsPredictor:
 def check_for_new_events():
     """Check for new economic events and run predictions."""
     # Create database session
-    db = ModelSession()
+    db = SessionLocal()
     
     try:
         # Get recent events (last hour)
@@ -119,7 +119,7 @@ def check_for_new_events():
 
 def store_predictions(news_data, predictions, probabilities):
     """Store model predictions in database."""
-    db = ModelSession()
+    db = SessionLocal()
     
     try:
         for i, (_, row) in enumerate(news_data.iterrows()):
