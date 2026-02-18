@@ -28,7 +28,6 @@ import pandas as pd
 session = SessionLocal()
     
 
-
 def check_if_need_update() -> bool:
     """Return True if current date is not the same as the min date """
     q = select(func.min(TodayEconomicNews.date))
@@ -39,7 +38,9 @@ def check_if_need_update() -> bool:
         return False
     return True
 
-
+# -----------------------------------------+
+#    SCHEDULER: Populate table every day   |
+# -----------------------------------------+
 def populate_database():
     """Populate database with daily economic news."""
     need_to_update = check_if_need_update()
@@ -61,6 +62,9 @@ def populate_database():
             news_df.to_sql(TodayEconomicNews.__tablename__, session.bind, if_exists='replace', index=False)
             print(f"Added {len(news_df)} news items to database")
 
+            # Setting scheduler on today to check the market before the news coming
+            set_multi_hour_scheduler_for_a_day()
+
         except Exception as e:
             print(f"Error populating database: {e}")
             session.rollback()
@@ -73,18 +77,6 @@ async def scheduled_population():
     """Async function to run database population."""
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, populate_database)
-
-
-async def check_the_market():
-    """Async function to check the market when the news are coming.
-    If there is some trigger alert, the bot notify you about it."""
-    data_retriever = DataRetriever()
-    predictions = data_retriever.check_the_market()
-    
-    if len(predictions) > 0:
-        # TODO: make TG bot support to write if the market may spread out.
-        # TODO: How to write message through telegram bot from here?
-        pass
 
 
 def setup_scheduler():
@@ -102,6 +94,28 @@ def setup_scheduler():
     return scheduler
 
 
+# ---------------------------------------------+
+#    SCHEDULER: Check the market before news   |
+# ---------------------------------------------+
+def check_the_market():
+    """Function to check the market when the news are coming.
+    If there is some trigger alert, the bot notify you about it."""
+    print('[INFO] Ready to check the market')
+    data_retriever = DataRetriever()
+    predictions = data_retriever.check_the_market()
+    
+    if len(predictions) > 0:
+        # TODO: make TG bot support to write if the market may spread out.
+        # TODO: How to write message through telegram bot from here?
+        pass
+
+
+async def scheduled_check_the_market():
+    """Async function to check the market berore news is out."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, check_the_market)
+
+
 def set_multi_hour_scheduler_for_a_day():
     """
     Setup and start the scheduler on the specific times, right 30min (can be also set on 1hour)
@@ -111,10 +125,12 @@ def set_multi_hour_scheduler_for_a_day():
     df = data_retriever.get_events_for_today()
     times_before_events = get_datetime_list_to_set_scheduler(df['date'], delta='30min')
 
+    print('The scheduler will be set on this times: \n', '\n'.join(times_before_events))
+
     multi_hour_scheduler = AsyncIOScheduler()
     for sch_time in times_before_events:
         multi_hour_scheduler.add_job(
-            check_the_market,
+            scheduled_check_the_market,
             CronTrigger(hour=sch_time.hour, minute=sch_time.minute),
             run_date=sch_time.date,
             id=f'daily_news_population_{str(int(time()))}'
