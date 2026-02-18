@@ -103,15 +103,4 @@ class DataRetriever:
                 'Chaos probability': is_chaos_prediction
             })
         return predictions
-
-
-class Predictor:
-    def __init__(self):
-        self.volatility_clf_model = None
-        self.range_predictor_model = None
-        self.chaos_clf_model = None
-
-    def get_model_predictions(self):
-        pass
-
-
+    
