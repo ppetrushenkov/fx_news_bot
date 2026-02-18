@@ -1,61 +1,54 @@
+from time import time
 from datetime import datetime
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 
-from db.database import engine, get_db
-from db.handlers import DataRetriever
+from db.database import SessionLocal
 from db.models import TodayEconomicNews
-from db.utils import convert_tz_to_moscow, fetch_economic_news, custom_datetime_crop_to_closest_half_hour
+from db.data_handler import DataRetriever
+
+from utils import (convert_tz_to_moscow, 
+                   fetch_economic_news, 
+                   custom_datetime_crop_to_closest_half_hour, 
+                   get_datetime_list_to_set_scheduler
+                   )
 
 from config import Config
 
 import asyncio
 import pandas as pd
 
-from time import time
-
 
 # Create session factory for scheduler
-SchedulerSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-session = SchedulerSession()
+session = SessionLocal()
     
 
-def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
-    """
-    Takes the raw datetime column from TodayEconomicNews table
-    and return the list of unique datetime values, when the events comes out
-    and shift it on `delta` back.
-    
-    :param event_times: Pandas datetime column from TodayEconomicNews table
-    :type event_times: pd.Series
-    :param delta: The value that the datetime will move back to
-    :type delta: str
-    :return: The pd.Series of datetime values, shifted back on `delta` value
-    :rtype: Series[Any]
-    """
-    crop_dates = event_times.apply(custom_datetime_crop_to_closest_half_hour)
-    unique_dates = crop_dates.unique()
-    unique_dates_shifted = unique_dates - pd.Timedelta(delta)
-    return unique_dates_shifted
+
+def check_if_need_update() -> bool:
+    """Return True if current date is not the same as the min date """
+    q = select(func.min(TodayEconomicNews.date))
+    min_date = session.execute(q).scalar()  # TODO: check this method or use .scalars().all()[0]
+    min_date = pd.to_datetime(min_date).date()
+    date_now = datetime.now().date()
+    if min_date == date_now:
+        return False
+    return True
 
 
 def populate_database():
     """Populate database with daily economic news."""
-    # Check the last data in the TodayEconomicNews
-    min_date_query = select(func.min(TodayEconomicNews.date))
-    min_date = session.execute(min_date_query).scalars().all()[0]
-    min_date = pd.to_datetime(min_date).date()
-    current_date = datetime.now().date()
-
-    if min_date == current_date:
+    need_to_update = check_if_need_update()
+    if not need_to_update:
         print("There is no need to populate database yet")
         return
 
     news_df = fetch_economic_news()
-    news_df['date'] = convert_tz_to_moscow(news_df['date'])
+    # TODO: What time need to be set globally here?
+    # news_df['date'] = convert_tz_to_moscow(news_df['date'])
     news_df.sort_values('date', inplace=True)
 
     if 'scale' not in news_df.columns:

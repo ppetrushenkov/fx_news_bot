@@ -2,7 +2,7 @@ from config import Config
 
 from db.database import get_db
 from db.models import TodayEconomicNews, Base
-from db.utils import custom_datetime_crop
+from bot.utils import custom_datetime_crop
 
 from twelvedata import TDClient
 

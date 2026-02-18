@@ -1,5 +1,5 @@
 from db.models import TodayEconomicNews
-from db.scheduler import populate_database, fetch_economic_news
+from bot.scheduler import populate_database, fetch_economic_news
 from db.database import create_tables, get_db
 import pandas as pd
 

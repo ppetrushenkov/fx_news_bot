@@ -78,5 +78,5 @@ class UserSubscription(Base):
     chat_id = Column(Integer)
     subscribed_to_alerts = Column(Boolean, default=True)
     subscribed_to_daily_summary = Column(Boolean, default=False)
-    user_tz = Column(String)
+    user_tz = Column(String, default='Europe/Moscow')  # TODO: CHANGE WHEN BUILD THE APP
     created_at = Column(DateTime, default=func.now())

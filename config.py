@@ -18,6 +18,8 @@ class Config:
     
     # Model paths
     VOLATILITY_MODEL_PATH = os.getenv('VOLATILITY_MODEL_PATH', 'models/volatility_model.cbm')
+    RANGE_MODEL_PATH = os.getenv('RANGE_MODEL_PATH', 'models/range_model.cbm')
+    CHAOS_MODEL_PATH = os.getenv('CHAOS_MODEL_PATH', 'models/chaos_model.cbm')
     
     # API endpoints
     TRADINGVIEW_NEWS_API = os.getenv('TRADINGVIEW_NEWS_API', 'https://economic-calendar.tradingview.com/events')

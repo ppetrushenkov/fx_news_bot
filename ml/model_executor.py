@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from db.database import engine, get_db
 from db.models import EconomicNews, Prediction
 
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier, CatBoostRegressor
 
 from config import Config
 
@@ -15,12 +15,32 @@ ModelSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class NewsPredictor:
-    def __init__(self, model_path=None):
-        """Initialize the predictor with a trained model."""
-        if model_path is None:
-            model_path = Config.VOLATILITY_MODEL_PATH
-        self.model = CatBoostClassifier()
-        self.model.load_model(model_path)
+    def __init__(self, 
+                 volatility_model_path=None,
+                 range_model_path=None,
+                 chaos_model_path=None
+                 ):
+        """Initialize the predictor with a trained models."""
+        if volatility_model_path is None:
+            volatility_model_path = Config.VOLATILITY_MODEL_PATH
+        if range_model_path is None:
+            range_model_path = Config.RANGE_MODEL_PATH
+        if chaos_model_path is None:
+            chaos_model_path = Config.CHAOS_MODEL_PATH
+        
+        try:
+            self.volatility_model = CatBoostClassifier()
+            self.volatility_model.load_model(volatility_model_path)
+
+            self.range_model = CatBoostRegressor()
+            self.range_model.load_model(range_model_path)
+
+            self.chaos_model = CatBoostClassifier()
+            self.chaos_model.load_model(chaos_model_path)
+        
+        except Exception as e:
+            ValueError('Can not load CatBoost models')
+            print(e)
         
     def prepare_features(self, news_data):
         """Prepare features for model prediction."""

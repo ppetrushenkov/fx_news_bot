@@ -1,9 +1,9 @@
 import asyncio
 from bot.app import main as start_bot
-from db.scheduler import setup_scheduler
-from bot.model_executor import check_for_new_events
+from bot.scheduler import setup_scheduler
+from ml.model_executor import check_for_new_events
 from db.database import create_tables
-from db.scheduler import populate_database
+from bot.scheduler import populate_database
 
 
 async def main():

@@ -69,3 +69,21 @@ def custom_datetime_crop(self, dtime: pd.Series):
         else:
             return dtime.floor(self.aggregation_time)
 
+
+def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
+    """
+    Takes the raw datetime column from TodayEconomicNews table
+    and return the list of unique datetime values, when the events comes out
+    and shift it on `delta` back.
+    
+    :param event_times: Pandas datetime column from TodayEconomicNews table
+    :type event_times: pd.Series
+    :param delta: The value that the datetime will move back to
+    :type delta: str
+    :return: The pd.Series of datetime values, shifted back on `delta` value
+    :rtype: Series[Any]
+    """
+    crop_dates = event_times.apply(custom_datetime_crop_to_closest_half_hour)
+    unique_dates = crop_dates.unique()
+    unique_dates_shifted = unique_dates - pd.Timedelta(delta)
+    return unique_dates_shifted
