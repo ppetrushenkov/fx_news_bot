@@ -75,10 +75,10 @@ def check_for_new_events():
         # Get recent events (last hour)
         one_hour_ago = datetime.now() - timedelta(hours=1)
         
-        recent_events = db.query(EconomicNews).filter(
-            EconomicNews.created_at >= one_hour_ago,
-            EconomicNews.event_weight >= 3
-        ).order_by(EconomicNews.created_at.desc()).all()
+        recent_events = db.query(TodayEconomicNews).filter(
+            TodayEconomicNews.created_at >= one_hour_ago,
+            TodayEconomicNews.event_weight >= 3
+        ).order_by(TodayEconomicNews.created_at.desc()).all()
         
         if recent_events:
             # Convert to DataFrame for compatibility with existing code
