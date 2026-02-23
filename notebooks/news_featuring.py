@@ -147,3 +147,43 @@ def extract_speaker_features(news_df: pd.DataFrame, speaker_col: str = 'Speaker'
     result_df = pd.concat(results.tolist(), ignore_index=True)
     
     return result_df
+
+
+def build_hour_features(
+    news_df: pd.DataFrame,
+    event_time_column: str = 'custom_event_time'
+) -> pd.DataFrame:
+    """
+    Build hour-level aggregated features from event-level news dataframe.
+
+    Parameters
+    ----------
+    news_df : pd.DataFrame
+        Event-level news data. Must contain:
+        ['event_hour', 'event_type', 'news_class',
+         'impact_rank', 'is_key_event', 'event_weight']
+
+    key_event_types : list[str], optional
+        List of key event types to build presence flags for
+        (e.g. ['NFP', 'CPI', 'PMI_MANUFACTURING']).
+        If None, inferred from is_key_event == True.
+
+    Returns
+    -------
+    pd.DataFrame
+        Hour-level feature table indexed by event_hour.
+    """
+
+    df = news_df.copy()
+
+    # -----------------------------
+    # 1. BASIC COUNTS & INTENSITY
+    # -----------------------------
+    agg = df.groupby(event_time_column).agg(
+        base_news_count=("importance", "count"),
+        base_high_impact_count=("importance", lambda x: (x == 2).sum()),
+        base_sum_impact_rank=("importance", "sum"),
+        base_max_impact_rank=("importance", "max"),
+    )
+
+    return agg

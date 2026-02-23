@@ -2,28 +2,35 @@ import numpy as np
 import pandas as pd
 import talib as ta
 from hurst import compute_Hc
+from skyfield.elementslib import period
 from tqdm.auto import tqdm
 
 tqdm.pandas(desc="Processing DataFrame")
 
 
 
+# def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
+#     # direction = pd.Series(ta.TRANGE(data['high'], data['low'], data['close'])).abs()
+#     direction = data.range.abs()
+#     sum_range = data.range.rolling(window).sum()
+#     return direction / sum_range
 def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
-    direction = data.close.diff().abs()
-    sum_range = data.range.rolling(window).sum()
-    return direction / sum_range
+    change = data['close'].diff(window).abs()
+    # volatility = data['close'].diff().abs().rolling(window).sum()
+    volatility = data.trange.abs().rolling(window).sum()
+    return change / volatility
 
 
 def custom_range_efficiency(data: pd.DataFrame, window: int = 3) -> float:
     total_range = data.high.rolling(window).max() - data.low.rolling(window).min()
-    sum_range = data.range.rolling(window=window).sum()
+    sum_range = data.trange.rolling(window=window).sum()
     return total_range / sum_range
 
 
 def noise_inside_the_bars(data: pd.DataFrame):
     body = (data['open'] - data['close']).abs()
     bar_range = data['high'] - data['low']
-    return (bar_range - body) / (body + 1e-9)
+    return body / (bar_range + 1e-9)
 
 
 def relative_range(bar_range: pd.Series, window: int):
@@ -71,19 +78,21 @@ def rolling_hurst(series: pd.Series, window=100):
 def calculate_chaos_features(data: pd.DataFrame, window: int = 14):
     atr = ta.ATR(data['high'], data['low'], data['close'], window)
 
-    data['range'] = ta.TRANGE(data['high'], data['low'], data['close'])
+    data['trange'] = ta.TRANGE(data['high'], data['low'], data['close'])
 
     # 1. Kaufman Efficiency Ratio
     data['kaufman_efficiency_ratio'] = kaufman_efficiency_ratio(data, window=window)
+    data['kaufman_efficiency_ratio_future'] = data['kaufman_efficiency_ratio'].shift(-window-1)
 
     # 2. Custom Range efficiency
     data['custom_range_efficiency'] = custom_range_efficiency(data, window=window)
+    data['custom_range_efficiency_future'] = data['custom_range_efficiency'].shift(-window-1)
 
     # 3. Wick-to-Body Ratio (Шум внутри баров)
     data['wick_ratio'] = noise_inside_the_bars(data)
 
     # 4. Relative Range
-    data['relative_range'] = relative_range(data['range'], window=window)
+    data['relative_range'] = relative_range(data['trange'], window=window)
     
     # 5. Relative ATR
     data['relative_atr'] = relative_atr(atr, window=window)
@@ -96,7 +105,7 @@ def calculate_chaos_features(data: pd.DataFrame, window: int = 14):
     data['normalized_bb_width'] = normalized_bb_width(bb_width, atr)
 
     # 8. Price to Volume
-    data['price_volume_ratio'] = data.range / (data.volume + 1e-9)
+    data['price_volume_ratio'] = data.trange / (data.volume + 1e-9)
 
     # 8. Hurst Exponent
     # data['hurst'] = rolling_hurst(data['close'], window=100)
