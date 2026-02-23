@@ -8,16 +8,10 @@ from tqdm.auto import tqdm
 tqdm.pandas(desc="Processing DataFrame")
 
 
-
-# def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
-#     # direction = pd.Series(ta.TRANGE(data['high'], data['low'], data['close'])).abs()
-#     direction = data.range.abs()
-#     sum_range = data.range.rolling(window).sum()
-#     return direction / sum_range
 def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
     change = data['close'].diff(window).abs()
-    # volatility = data['close'].diff().abs().rolling(window).sum()
-    volatility = data.trange.abs().rolling(window).sum()
+    volatility = data['close'].diff().abs().rolling(window).sum()
+    # volatility = data.trange.abs().rolling(window).sum()
     return change / volatility
 
 
