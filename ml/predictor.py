@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
+from sys import prefix
 
 from db.database import SessionLocal
 from db.models import TodayEconomicNews, Prediction
+
+from news_featuring import classify_news, get_specific_event_type, period_extraction, floor_or_ceil, build_hour_features
 
 from catboost import CatBoostClassifier, CatBoostRegressor
 
@@ -9,9 +12,6 @@ from config import Config
 
 import pandas as pd
 import numpy as np
-
-# Create session factory for model executor
-# ModelSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class VolatilityPredictor:
@@ -41,16 +41,55 @@ class VolatilityPredictor:
         except Exception as e:
             ValueError('Can not load CatBoost models')
             print(e)
+
+    def get_predictions(self, news: pd.DataFrame, prices: pd.DataFrame):
+        """Main function. Takes news and prices, do preprocessing and return predictions for data"""
+        data = self.get_preprocessed_data_for_ml_predictions(news, prices)
+        volatility_predictions = self.predict_volatility(data)
+        range_predictions = self.predict_range(data)
+        chaos_predictions = self.predict_chaos(data)
+        return (volatility_predictions, range_predictions, chaos_predictions)
+
+    def get_preprocessed_data_for_ml_predictions(self, news: pd.DataFrame, prices: pd.DataFrame):
+        news = self.add_features_for_news(news)
+        prices = self.add_features_for_prices(prices)
+        data = news.merge(prices, on='utc_datetime', how='inner')
+        # TODO: add features, that should be add only here if I can't add it earlier
+        return data
         
-    def prepare_features(self, news_data):
-        """Prepare features for model prediction."""
-        # Implementation based on your existing feature engineering
-        # This would include:
-        # - News features (importance, event type, etc.)
-        # - Market features (if available)
-        # - Time-based features
-        # For now, return empty array as placeholder
-        return np.array([]).reshape(len(news_data), 0)
+    def add_features_for_news(self, news) -> pd.DataFrame:
+        # Add features
+        news['class'] = news['comment'].astype(str).apply(classify_news)
+        news['event_type'] = news['title'].apply(get_specific_event_type)
+        news['period'] = news['period'].astype(str).apply(period_extraction)
+
+        news['impact_rank'] = news['importance'] + 1
+        # TODO: Add source feature
+
+        # Dummy features
+        news = self.add_dummies(news, 'period', prefix='per', drop_list=None)
+        news = self.add_dummies(news, 'class', prefix='cat', drop_list=['cat_OTHER'])
+        news = self.add_dummies(news, 'event_type', prefix='e', drop_list=['e_OTHER'])
+        news = self.add_dummies(news, 'currency', prefix='cur', drop_list=None)
+
+        # TODO: Consider convert datetime to moscow timezone here
+        news['cropped_event_time'] = news['utc_dt'].progress_apply(floor_or_ceil)
+
+        key_events = {
+            "NFP", "CPI", "CORE_CPI", "PCE", "FOMC_RATE", "FOMC_PRES_CONF",
+            "PMI_MANUFACTURING", "PMI_SERVICES", "GDP"
+        }
+        news_agg = build_hour_features(news, key_event_types=key_events)
+        return news_agg
+
+    def add_dummies(self, news: pd.DataFrame, col: str, prefix=None, drop_list=None):
+        dummy = pd.get_dummies(news[col], prefix=prefix).astype(int)
+        if drop_list:
+            dummy = dummy.drop(drop_list, axis=1)
+        return pd.concat([news, dummy], axis=1)
+
+    def add_features_for_prices(self, prices) -> pd.DataFrame:
+        return None
         
     def predict_volatility(self, news_data):
         """Predict volatility based on news data."""
@@ -64,6 +103,12 @@ class VolatilityPredictor:
             probability = np.zeros(len(news_data))
         
         return prediction, probability
+
+    def predict_range(self, data: pd.DataFrame):
+        pass
+
+    def predict_chaos(self, data: pd.DataFrame):
+        pass
 
 
 def check_for_new_events():
