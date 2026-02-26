@@ -4,7 +4,6 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-# from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 
 from db.database import SessionLocal
@@ -106,20 +105,20 @@ def check_the_market_events_pipeline():
     """Pipeline function to check the market before news is out."""
     data_retriever = DataRetriever()
     coming_events = data_retriever.get_events_for_today()
-    prices = data_retriever.get_prices()
+    prices = data_retriever.get_last_prices()
 
-    coming_events = predictor.prepare_features_for_events(coming_events, prices)
-    predictions = predictor.predict(coming_events)
+    predictions = predictor.get_predictions(coming_events, prices)
     
     return predictions
 
 
-def check_the_market():
+def check_the_market_and_alert_the_users():
     """Function to check the market when the news are coming.
     If there is some trigger alert, the bot notify you about it."""
     print('[INFO] Ready to check the market')
     predictions = check_the_market_events_pipeline()
-    
+
+    # Alert if predictions are not empty
     if len(predictions) > 0:
         # TODO: make TG bot support to write if the market may spread out.
         # TODO: How to write message through telegram bot from here?
@@ -129,7 +128,7 @@ def check_the_market():
 async def scheduled_check_the_market():
     """Async function to check the market berore news is out."""
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, check_the_market)
+    await loop.run_in_executor(None, check_the_market_and_alert_the_users)
 
 
 def set_multi_hour_scheduler_for_a_day():
