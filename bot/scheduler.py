@@ -11,6 +11,8 @@ from db.database import SessionLocal
 from db.models import TodayEconomicNews
 from db.data_handler import DataRetriever
 
+from ml.predictor import VolatilityPredictor
+
 from utils import (convert_tz_to_moscow, 
                    fetch_economic_news, 
                    custom_datetime_crop_to_closest_half_hour, 
@@ -26,6 +28,9 @@ import pandas as pd
 
 # Create session factory for scheduler
 session = SessionLocal()
+
+# Predictor
+predictor = VolatilityPredictor()
     
 
 def check_if_need_update() -> bool:
@@ -97,12 +102,23 @@ def setup_scheduler():
 # ---------------------------------------------+
 #    SCHEDULER: Check the market before news   |
 # ---------------------------------------------+
+def check_the_market_events_pipeline():
+    """Pipeline function to check the market before news is out."""
+    data_retriever = DataRetriever()
+    coming_events = data_retriever.get_events_for_today()
+    prices = data_retriever.get_prices()
+
+    coming_events = predictor.prepare_features_for_events(coming_events, prices)
+    predictions = predictor.predict(coming_events)
+    
+    return predictions
+
+
 def check_the_market():
     """Function to check the market when the news are coming.
     If there is some trigger alert, the bot notify you about it."""
     print('[INFO] Ready to check the market')
-    data_retriever = DataRetriever()
-    predictions = data_retriever.check_the_market()
+    predictions = check_the_market_events_pipeline()
     
     if len(predictions) > 0:
         # TODO: make TG bot support to write if the market may spread out.
