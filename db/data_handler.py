@@ -25,14 +25,14 @@ class DataRetriever:
         self.supported_tickers = ['EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCAD', 'AUDUSD', 'NZDUSD']
         self.aggregation_time = aggregation_time
 
-    def select_all_to_df(self, db_model) -> pd.DataFrame:
+    def get_all_records_from_table(self, db_model) -> pd.DataFrame:
         """Select all records from the database and return them as a pandas DataFrame."""
         query = self.db.query(db_model)
         return pd.read_sql_query(query.statement, self.db.bind, params=query.statement.compile().params)
 
     def get_events_for_today(self) -> pd.DataFrame:
         """Get events for today."""
-        events_today = self.select_all_to_df(TodayEconomicNews)
+        events_today = self.get_all_records_from_table(TodayEconomicNews)
         return events_today
 
     def get_aggregated_events_for_now(self, event_time: str) -> pd.DataFrame:
@@ -47,7 +47,7 @@ class DataRetriever:
 
     def get_last_prices(self) -> pd.DataFrame:
         """Fetch last prices for supported tickers from Twelve Data source"""
-        # TODO: Define, how may outputsize do I need for predictions
+        # TODO: Define, how may output size do I need for predictions
         ts = self.td.time_series(
             symbol=self.supported_tickers,
             interval="30min",
