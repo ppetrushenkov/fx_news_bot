@@ -101,12 +101,11 @@ def setup_scheduler():
 # ---------------------------------------------+
 #    SCHEDULER: Check the market before news   |
 # ---------------------------------------------+
-def check_the_market_events_pipeline():
+def check_the_market():
     """Pipeline function to check the market before news is out."""
     data_retriever = DataRetriever()
     coming_events = data_retriever.get_events_for_today()
     prices = data_retriever.get_last_prices()
-
     predictions = predictor.get_predictions(coming_events, prices)
     
     return predictions
@@ -116,7 +115,7 @@ def check_the_market_and_alert_the_users():
     """Function to check the market when the news are coming.
     If there is some trigger alert, the bot notify you about it."""
     print('[INFO] Ready to check the market')
-    predictions = check_the_market_events_pipeline()
+    predictions = check_the_market()
 
     # Alert if predictions are not empty
     if len(predictions) > 0:
