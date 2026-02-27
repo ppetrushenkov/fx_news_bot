@@ -104,9 +104,9 @@ def setup_scheduler():
 def check_the_market():
     """Pipeline function to check the market before news is out."""
     data_retriever = DataRetriever()
-    coming_events = data_retriever.get_events_for_today()
+    events = data_retriever.get_aggregated_events_for_coming_hour()
     prices = data_retriever.get_last_prices()
-    predictions = predictor.get_predictions(coming_events, prices)
+    predictions = predictor.get_predictions(events, prices)
     
     return predictions
 
