@@ -34,6 +34,12 @@ class DataRetriever:
         """Get events for today."""
         events_today = self.get_all_records_from_table(TodayEconomicNews)
         return events_today
+    
+    def get_aggregated_events_for_coming_hour(self) -> pd.DataFrame:
+        """Return events for coming hour."""
+        events_today = self.get_all_records_from_table()
+        coming_events = 
+        return coming_events
 
     def get_aggregated_events_for_now(self, event_time: str) -> pd.DataFrame:
         # TODO: Write aggregation function
