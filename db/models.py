@@ -48,6 +48,14 @@ class TodayEconomicNews(Base):
     comment = Column(String)
     scale = Column(String)
 
+class TodayEventsAggregated(Base):
+    __tablename__ = 'today_events_aggregated'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    country = Column(String)
+    indicator = ...
+
 class Prices(Base):
     __tablename__ = 'prices'
     
