@@ -1,7 +1,8 @@
 from config import Config
 
 from db.database import SessionLocal
-from db.models import TodayEconomicNews
+from db.models import TodayEconomicNews, TodayEventsAggregated
+
 from bot.utils import custom_datetime_crop
 
 from twelvedata import TDClient
@@ -37,8 +38,8 @@ class DataRetriever:
     
     def get_aggregated_events_for_coming_hour(self) -> pd.DataFrame:
         """Return events for coming hour."""
-        events_today = self.get_all_records_from_table()
-        coming_events = 
+        events_today = self.get_all_records_from_table(TodayEventsAggregated)
+        coming_events = ...
         return coming_events
 
     def get_aggregated_events_for_now(self, event_time: str) -> pd.DataFrame:
