@@ -37,6 +37,10 @@ def fetch_economic_news(delta: int = 1) -> pd.DataFrame:
         response = requests.get(url, headers=headers, params=payload)
         data = response.json()
         news_df = pd.DataFrame(data['result'])
+        news_df.sort_values('date', inplace=True)
+        
+        if 'scale' not in news_df.columns:
+            news_df['scale'] = None
         return news_df
     
     except Exception as e:
@@ -54,20 +58,20 @@ def fetch_economic_news_for_a_week() -> pd.DataFrame:
     return fetch_economic_news(5)
 
 
-def custom_datetime_crop(self, dtime: pd.Series):
+def custom_datetime_crop(self, dtime: pd.Series, aggregation_time: str = '30min'):
     dtime = pd.to_datetime(dtime)
     minutes = dtime.minute
 
-    if self.aggregation_time == '30min':
+    if aggregation_time == '30min':
         if (59 >= minutes >= 45) or (29 >= minutes >= 15):
             return dtime.ceil('30min')
         else:
             return dtime.floor('30min')
-    elif self.aggregation_time in ['1h', 'h']:
+    elif aggregation_time in ['1h', 'h']:
         if minutes >= 30:
-            return dtime.ceil(self.aggregation_time)
+            return dtime.ceil(aggregation_time)
         else:
-            return dtime.floor(self.aggregation_time)
+            return dtime.floor(aggregation_time)
 
 
 def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30min') -> pd.Series:
