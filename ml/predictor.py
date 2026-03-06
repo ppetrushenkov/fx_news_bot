@@ -4,7 +4,7 @@ from sys import prefix
 from db.database import SessionLocal
 from db.models import TodayEconomicNews, Prediction
 
-from news_featuring import classify_news, get_specific_event_type, period_extraction, floor_or_ceil, build_hour_features
+from news_featuring import classify_news, classify_event_type, period_extraction, floor_or_ceil, build_hour_features
 
 from catboost import CatBoostClassifier, CatBoostRegressor
 
@@ -44,23 +44,23 @@ class VolatilityPredictor:
 
     def get_predictions(self, news: pd.DataFrame, prices: pd.DataFrame):
         """Main function. Takes news and prices, do preprocessing and return predictions for data"""
-        data = self.get_preprocessed_data_for_ml_predictions(news, prices)
+        data = self.preprocess_data_for_ml_predictions(news, prices)
         volatility_predictions = self.predict_volatility(data)
         range_predictions = self.predict_range(data)
         chaos_predictions = self.predict_chaos(data)
         return (volatility_predictions, range_predictions, chaos_predictions)
 
-    def get_preprocessed_data_for_ml_predictions(self, news: pd.DataFrame, prices: pd.DataFrame):
-        news = self.add_features_for_news(news)
+    def preprocess_data_for_ml_predictions(self, news: pd.DataFrame, prices: pd.DataFrame):
+        # news = self.add_features_for_news(news)  # News already preprocessed
         prices = self.add_features_for_prices(prices)
         data = news.merge(prices, on='utc_datetime', how='inner')
-        # TODO: add features, that should be add only here if I can't add it earlier
+        # TODO: add features, that should be added only here if I can't add it earlier
         return data
         
     def add_features_for_news(self, news) -> pd.DataFrame:
         # Add features
         news['class'] = news['comment'].astype(str).apply(classify_news)
-        news['event_type'] = news['title'].apply(get_specific_event_type)
+        news['event_type'] = news['title'].apply(classify_event_type)
         news['period'] = news['period'].astype(str).apply(period_extraction)
 
         news['impact_rank'] = news['importance'] + 1
@@ -111,88 +111,88 @@ class VolatilityPredictor:
         pass
 
 
-def check_for_new_events():
-    """Check for new economic events and run predictions."""
-    # Create database session
-    db = SessionLocal()
+# def check_for_new_events():
+#     """Check for new economic events and run predictions."""
+#     # Create database session
+#     db = SessionLocal()
     
-    try:
-        # Get recent events (last hour)
-        one_hour_ago = datetime.now() - timedelta(hours=1)
+#     try:
+#         # Get recent events (last hour)
+#         one_hour_ago = datetime.now() - timedelta(hours=1)
         
-        recent_events = db.query(TodayEconomicNews).filter(
-            TodayEconomicNews.created_at >= one_hour_ago,
-            TodayEconomicNews.event_weight >= 3
-        ).order_by(TodayEconomicNews.created_at.desc()).all()
+#         recent_events = db.query(TodayEconomicNews).filter(
+#             TodayEconomicNews.created_at >= one_hour_ago,
+#             TodayEconomicNews.event_weight >= 3
+#         ).order_by(TodayEconomicNews.created_at.desc()).all()
         
-        if recent_events:
-            # Convert to DataFrame for compatibility with existing code
-            events_data = [{
-                'id': event.id,
-                'date': event.date,
-                'currency': event.currency,
-                'importance': event.importance,
-                'title': event.title,
-                'indicator': event.indicator,
-                'country': event.country,
-                'category': event.category,
-                'event_type': event.event_type,
-                'is_key_event': event.is_key_event,
-                'event_weight': event.event_weight,
-                'custom_event_time': event.custom_event_time,
-                'created_at': event.created_at
-            } for event in recent_events]
+#         if recent_events:
+#             # Convert to DataFrame for compatibility with existing code
+#             events_data = [{
+#                 'id': event.id,
+#                 'date': event.date,
+#                 'currency': event.currency,
+#                 'importance': event.importance,
+#                 'title': event.title,
+#                 'indicator': event.indicator,
+#                 'country': event.country,
+#                 'category': event.category,
+#                 'event_type': event.event_type,
+#                 'is_key_event': event.is_key_event,
+#                 'event_weight': event.event_weight,
+#                 'custom_event_time': event.custom_event_time,
+#                 'created_at': event.created_at
+#             } for event in recent_events]
             
-            recent_events_df = pd.DataFrame(events_data)
+#             recent_events_df = pd.DataFrame(events_data)
             
-            # Load trained model
-            predictor = NewsPredictor()
+#             # Load trained model
+#             predictor = NewsPredictor()
             
-            # Run predictions
-            predictions, probabilities = predictor.predict_volatility(recent_events_df)
+#             # Run predictions
+#             predictions, probabilities = predictor.predict_volatility(recent_events_df)
             
-            # Store predictions in database
-            store_predictions(recent_events_df, predictions, probabilities)
+#             # Store predictions in database
+#             store_predictions(recent_events_df, predictions, probabilities)
             
-            # Send alerts if needed
-            send_alerts(recent_events_df, predictions, probabilities)
-    except Exception as e:
-        print(f"Error checking for new events: {e}")
-    finally:
-        db.close()
+#             # Send alerts if needed
+#             send_alerts(recent_events_df, predictions, probabilities)
+#     except Exception as e:
+#         print(f"Error checking for new events: {e}")
+#     finally:
+#         db.close()
 
 
-def store_predictions(news_data, predictions, probabilities):
-    """Store model predictions in database."""
-    db = SessionLocal()
+# def store_predictions(news_data, predictions, probabilities):
+#     """Store model predictions in database."""
+#     db = SessionLocal()
     
-    try:
-        for i, (_, row) in enumerate(news_data.iterrows()):
-            prediction = Prediction(
-                news_id=row['id'],
-                model_type='volatility_classifier',
-                prediction_value=float(predictions[i]),
-                prediction_probability=float(probabilities[i])
-            )
-            db.add(prediction)
+#     try:
+#         for i, (_, row) in enumerate(news_data.iterrows()):
+#             prediction = Prediction(
+#                 news_id=row['id'],
+#                 model_type='volatility_classifier',
+#                 prediction_value=float(predictions[i]),
+#                 prediction_probability=float(probabilities[i])
+#             )
+#             db.add(prediction)
         
-        db.commit()
-        print(f"Stored {len(predictions)} predictions in database")
-    except Exception as e:
-        print(f"Error storing predictions: {e}")
-        db.rollback()
-    finally:
-        db.close()
+#         db.commit()
+#         print(f"Stored {len(predictions)} predictions in database")
+#     except Exception as e:
+#         print(f"Error storing predictions: {e}")
+#         db.rollback()
+#     finally:
+#         db.close()
 
 
-def send_alerts(news_data, predictions, probabilities):
-    """Send alerts to subscribed users."""
-    # Implementation would integrate with your Telegram bot
-    # to send notifications about high-impact events
-    print(f"Would send alerts for {len(news_data)} events")
-    pass
+# def send_alerts(news_data, predictions, probabilities):
+#     """Send alerts to subscribed users."""
+#     # Implementation would integrate with your Telegram bot
+#     # to send notifications about high-impact events
+#     print(f"Would send alerts for {len(news_data)} events")
+#     pass
 
 
-# Initialize database tables if not already created
-from db.database import create_tables
-create_tables()
+## Initialize database tables if not already created
+# from db.database import create_tables
+# create_tables()

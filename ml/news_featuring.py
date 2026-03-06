@@ -164,7 +164,7 @@ def classify_news(title: str):
     return max(scores, key=scores.get)
 
 
-def get_specific_event_type(title: str) -> str:
+def classify_event_type(title: str) -> str:  # or classify_high_impact_events
     t = title.lower()
 
     if "non farm" in t or "nonfarm" in t:
