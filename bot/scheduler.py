@@ -7,7 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import func, select
 
 from db.database import SessionLocal
-from db.models import TodayEconomicNews, TodayEventsAggregated
+from db.models import TodayEconomicNews, TodayEventsAggregated, UserSubscription
 from db.data_handler import DBHandler
 
 from ml.predictor import VolatilityPredictor
@@ -31,6 +31,15 @@ session = SessionLocal()
 # Predictor
 predictor = VolatilityPredictor()
 
+
+async def send_alert_to_users(predictions):
+    """Send alert to users if there is some trigger alert."""
+    subscribers = session.query(UserSubscription).all()
+    try:
+        for subscriber in subscribers:
+            bot.send_message(chat_id=subscriber.chat_id, text="There is some trigger alert")
+    except Exception as e:
+        print(f'Error sending alert to users: {e}')
 
 # -----------------------------------------+
 #    SCHEDULER: Populate table every day   |
@@ -57,20 +66,24 @@ def populate_database():
     db_handler.write_table_to_database(df=agg_news, table_name=TodayEventsAggregated.__tablename__)
     print("Aggregation table populated successfully")
 
+    print("Set up scheduler for checking the market before news is out")
+    set_multi_hour_scheduler_for_a_day()
+    print("Scheduler set up successfully")
 
-async def scheduled_population():
+
+async def scheduled_everyday_population():
     """Async function to run database population."""
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, populate_database)
 
 
-def setup_scheduler():
+def setup_everyday_population_scheduler():
     """Setup and start the scheduler."""
     scheduler = AsyncIOScheduler()
     
     # Schedule daily news population
     scheduler.add_job(
-        scheduled_population,
+        scheduled_everyday_population,
         CronTrigger(hour=Config.NEWS_UPDATE_HOUR, minute=Config.NEWS_UPDATE_MINUTE),
         id='daily_news_population'
     )
@@ -82,17 +95,19 @@ def setup_scheduler():
 # ---------------------------------------------+
 #    SCHEDULER: Check the market before news   |
 # ---------------------------------------------+
-def check_the_market():
-    """Pipeline function to check the market before news is out."""
-    data_retriever = DBHandler()
-    events = data_retriever.get_aggregated_events_for_coming_hour()
-    prices = data_retriever.get_last_prices()
+def check_the_market() -> pd.DataFrame:
+    """Pipeline function to check the market before news is out.
+    It will return the Pandas dataframe with predictions for every ticker.
+    """
+    db_handler = DBHandler()
+    events = db_handler.get_aggregated_events_for_coming_hour()
+    prices = db_handler.get_last_prices()
     predictions = predictor.get_predictions(events, prices)
     
     return predictions
 
 
-def check_the_market_and_alert_the_users():
+async def check_the_market_and_alert_the_users():
     """Function to check the market when the news are coming.
     If there is some trigger alert, the bot notify you about it."""
     print('[INFO] Ready to check the market')
@@ -100,9 +115,8 @@ def check_the_market_and_alert_the_users():
 
     # Alert if predictions are not empty
     if len(predictions) > 0:
-        # TODO: make TG bot support to write if the market may spread out.
-        # TODO: How to write message through telegram bot from here?
-        pass
+        print('[INFO] Alert the users')
+        await send_alert_to_users(predictions)
 
 
 async def scheduled_check_the_market():
