@@ -46,7 +46,7 @@ def relative_volume(volume: pd.Series, window: int):
 
 def calculate_bb_width(data: pd.DataFrame, window: int):
     upper_band, middle_band, lower_band = ta.BBANDS(
-        data['close'], 
+        data['close'].values,
         timeperiod=window, 
         nbdevup=3,
         nbdevdn=3,
@@ -59,14 +59,14 @@ def normalized_bb_width(bb_width, atr):
 
 
 
-def rolling_hurst(series: pd.Series, window=100):
+def rolling_hurst(series: pd.Series, window=100) -> pd.Series:
     def get_h(sub_series):
         if len(sub_series) < 50:
             return np.nan
         H, _, _ = compute_Hc(sub_series, kind='price', simplified=True)
         return H
     
-    return series.rolling(window=window).progress_apply(get_h, raw=False)
+    return series.rolling(window=window).apply(get_h, raw=False)
 
 
 def calculate_chaos_features(data: pd.DataFrame, window: int = 14):

@@ -86,7 +86,7 @@ class TodayEventsAggregated(Base):
     is_cat_gdp = Column(Boolean)
     is_cat_inflation = Column(Boolean)
     is_cat_labor_market = Column(Boolean)
-    is_cat_manufactoring = Column(Boolean)
+    is_cat_manufacturing = Column(Boolean)
     is_cat_monetary_policy = Column(Boolean)
     is_cat_sentiment = Column(Boolean)
     is_cat_trade_finance = Column(Boolean)
