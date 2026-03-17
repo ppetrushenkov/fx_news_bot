@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import pandas_ta as ta
 
-
 def add_daily_atr(data: pd.DataFrame, period=14) -> pd.DataFrame:
     """
     Добавляет ATR для каждого дня в датафрейме.
@@ -22,7 +21,6 @@ def add_daily_atr(data: pd.DataFrame, period=14) -> pd.DataFrame:
     data = pd.merge(data, daily_data[['time', 'daily_atr']], on='time', how='left')
     data['daily_atr'] = data['daily_atr'].ffill()
     return data
-
 
 def get_bar_volatility_gradation(data: pd.DataFrame, atr: pd.Series, daily_atr: pd.Series, period: int = 24, n_forward: int = 4) -> pd.Series:
     """Возвращает максимальную степень волатильности для любого из следующих N баров.
@@ -57,19 +55,16 @@ def get_bar_volatility_gradation(data: pd.DataFrame, atr: pd.Series, daily_atr: 
     grads = pd.Series(grads).shift(-n_forward).rolling(n_forward).max()
     return grads
 
-
 def get_future_range(data: pd.DataFrame, n_forward: int = 4) -> pd.Series:
     future_max = data['high'].shift(-n_forward).rolling(n_forward).max()
     future_min = data['low'].shift(-n_forward).rolling(n_forward).min()
     future_range = future_max - future_min
     return future_range
 
-
 def get_big_wick_candles(data: pd.DataFrame, n_forward: int = 4, wick_ratio: float = 0.2) -> pd.Series:
     body = (data['Open'] - data['Close']).abs()
-    ratio = body / data.trange  # TODO: add forward looking
+    ratio = body / data.trange  # add forward looking
     return (ratio < wick_ratio).astype(int)
-
 
 def set_targets(data: pd.DataFrame, look_forward_bars: int = 5, period: int = 24):
     """
@@ -86,15 +81,15 @@ def set_targets(data: pd.DataFrame, look_forward_bars: int = 5, period: int = 24
         - 6 часов
     (CHAOS CLASSIFICATION)
     - `trg_big_doji` - возвращает True, если в ближайшие 2 часа будет большая Доджи (или пин бар) свеча.
-    По сути свеча с отношением тела ко всей свече ниже 0.2;
+        По сути свеча с отношением тела ко всей свече ниже 0.2;
     - `trg_dir_changes` - подсчет количества смен направлений после выхода новости
-    (количество поочередных обновлений экстремумов).
-    Так же может называться как поочередное выбивание стопов в обе стороны;
+        (количество поочередных обновлений экстремумов).
+        Так же может называться как поочередное выбивание стопов в обе стороны;
     - `trg_is_flat_flg` - минимальное значение KER (Kaufman Efficiency Ratio) на следующих N (от 8 до 24) баров.
-    Должно быть меньше 0.1;
+        Должно быть меньше 0.1;
     - `trg_is_trend_flg` - максимальное значение KER на следующих N (от 8 до 24) баров. Должно быть больше 0.5;
     - `trg_is_chaos` - комплексная метка, означающая количество смен направлений (trg_dir_changes) > 1,
-    волатильность > 3х АТР и одновременно должно быть и тренд и флэт.
+        волатильность > 3х АТР и одновременно должно быть и тренд и флэт.
     """
     # Prerequisites
     atr = ta.atr(data['high'], data['low'], data['close'], length=period)
@@ -112,3 +107,17 @@ def set_targets(data: pd.DataFrame, look_forward_bars: int = 5, period: int = 24
     # Chaos classification
     ## Big wick candles
     big_wick_candles = get_big_wick_candles(data, n_forward = 4, wick_ratio = 0.2)
+
+    # Set targets
+    data['trg_bar_volatility_expansion_gradation'] = volatility_gradation
+    data['trg_is_greater_daily_atr'] = (data['high'].shift(-look_forward_bars).rolling(look_forward_bars).max() > daily_atr)
+    data['trg_future_range_1h'] = get_future_range(data, n_forward=2)
+    data['trg_future_range_3h'] = get_future_range(data, n_forward=6)
+    data['trg_future_range_6h'] = get_future_range(data, n_forward=12)
+    data['trg_big_doji'] = big_wick_candles
+    data['trg_dir_changes'] = (data['high'].diff().abs() > 0).cumsum()
+    data['trg_is_flat_flg'] = (ta.ker(data['open'], data['close'], data['high'], data['low']) < 0.1)
+    data['trg_is_trend_flg'] = (ta.ker(data['open'], data['close'], data['high'], data['low']) > 0.5)
+    data['trg_is_chaos'] = ((data['high'].diff().abs() > 0).cumsum() > 1) & (volatility_gradation > 3) & ((data['trg_is_flat_flg'] | data['trg_is_trend_flg']))
+
+    return data
