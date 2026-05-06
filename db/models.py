@@ -1,14 +1,16 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey
+from numpy import integer
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 
 
 Base = declarative_base()
 
-class AllEconomicNews(Base):
-    __tablename__ = 'all_economic_news'
 
+class Events(Base):
+    __tablename__ = 'events'
     id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer)
     title = Column(String, nullable=False)
     country = Column(String)
     indicator = Column(String)
@@ -32,72 +34,32 @@ class AllEconomicNews(Base):
     scale = Column(String)
 
 
-class TodayEconomicNews(Base):
-    __tablename__ = 'today_economic_news'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    title = Column(String, nullable=False)
-    country = Column(String)
-    indicator = Column(String)
-    category = Column(String)
-    period = Column(String)
-    referenceDate = Column(DateTime)
-    source = Column(String)
-    source_url = Column(String)
-    actual = Column(String)
-    previous = Column(String)
-    forecast = Column(String)
-    actualRaw = Column(Float)
-    previousRaw = Column(Float)
-    forecastRaw = Column(Float)
-    currency = Column(String)
-    importance = Column(Integer)
-    date = Column(DateTime)
-    ticker = Column(String)
-    unit = Column(String)
-    comment = Column(String)
-    scale = Column(String)
 
-
-class TodayEventsAggregated(Base):
-    __tablename__ = 'today_events_aggregated'
+# class TodayEconomicEvents(Base):
+#     __tablename__ = 'today_economic_events'
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    agg_time = Column(DateTime)
-    news_cnt = Column(Integer)
-    high_imp_cnt = Column(Integer)
-    sum_imp_cnt = Column(Integer)
-    max_imp_rnk = Column(Integer)
-    main_event_type = Column(String)
-    is_core_cpi = Column(Boolean)
-    is_cpi = Column(Boolean)
-    is_fomc = Column(Boolean)
-    is_gdp = Column(Boolean)
-    is_nfp = Column(Boolean)
-    is_pce = Column(Boolean)
-    is_pmi_mnf = Column(Boolean)
-    is_pmi_srv = Column(Boolean)
-    is_retail = Column(Boolean)
-    is_cat_bonds = Column(Boolean)
-    is_cat_sb_speech = Column(Boolean)
-    is_cat_commodities = Column(Boolean)
-    is_cat_consumer_housing = Column(Boolean)
-    is_cat_economic_activity = Column(Boolean)
-    is_cat_gdp = Column(Boolean)
-    is_cat_inflation = Column(Boolean)
-    is_cat_labor_market = Column(Boolean)
-    is_cat_manufacturing = Column(Boolean)
-    is_cat_monetary_policy = Column(Boolean)
-    is_cat_sentiment = Column(Boolean)
-    is_cat_trade_finance = Column(Boolean)
-    is_cur_eur = Column(Boolean)
-    is_cur_gpb = Column(Boolean)
-    is_cur_jpy = Column(Boolean)
-    is_cur_aud = Column(Boolean)
-    is_cur_usd = Column(Boolean)
-    prev_main_event_type = Column(String)
-    hours_from_last_key_event = Column(Integer)
-    hours_from_last_max_impact = Column(Integer)
+#     id = Column(Integer, primary_key=True, autoincrement=True)
+#     title = Column(String, nullable=False)
+#     country = Column(String)
+#     indicator = Column(String)
+#     category = Column(String)
+#     period = Column(String)
+#     referenceDate = Column(DateTime)
+#     source = Column(String)
+#     source_url = Column(String)
+#     actual = Column(String)
+#     previous = Column(String)
+#     forecast = Column(String)
+#     actualRaw = Column(Float)
+#     previousRaw = Column(Float)
+#     forecastRaw = Column(Float)
+#     currency = Column(String)
+#     importance = Column(Integer)
+#     date = Column(DateTime)
+#     ticker = Column(String)
+#     unit = Column(String)
+#     comment = Column(String)
+#     scale = Column(String)
 
 
 class Prices(Base):
@@ -111,20 +73,69 @@ class Prices(Base):
     low = Column(Float)
     close = Column(Float)
 
+    __table_args__ = (
+        UniqueConstraint("datetime", "ticker", name="uq_prices_datetime_ticker"),
+    )
 
-class Prediction(Base):
+
+class Ranges(Base):
+    """
+    Stores realized future ranges after an event (computed from price bars).
+
+    Required structure from user:
+    - main_event name
+    - datetime
+    - future_range_1h/3h/6h/24h
+    """
+
+    __tablename__ = "ranges"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String, nullable=False)
+    datetime = Column(DateTime, nullable=False)
+    main_event = Column(String, nullable=False)  # or "No main event"
+
+    future_range_1h = Column(Float)
+    future_range_3h = Column(Float)
+    future_range_6h = Column(Float)
+    future_range_24h = Column(Float)
+
+    created_at = Column(DateTime, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("main_event", "datetime", "ticker", name="uq_event_ranges_main_event_datetime"),
+    )
+
+
+class Predictions(Base):
     __tablename__ = 'predictions'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    news_id = Column(Integer, ForeignKey('economic_news.id'))
-    model_type = Column(String)
-    prediction_value = Column(Float)
-    prediction_probability = Column(Float)
-    volatility_category = Column(Integer)
-    predicted_at = Column(DateTime, default=func.now())
+    rounded_date = Column(DateTime)
+    ticker = Column(String)
+    trg_future_range_1h = Column(String)  # Will be stored as string splitted with "-" like "54 - 76"
+    trg_future_range_3h = Column(String) 
+    trg_future_range_6h = Column(String) 
+    trg_future_range_24h = Column(String)
+    trg_future_overall_range_1h = Column(String)
+    trg_future_overall_range_3h = Column(String)
+    trg_future_overall_range_6h = Column(String)
+    trg_future_overall_range_24h = Column(String)
+    trg_expect_big_doji = Column(Integer)  # 1 if in the next 4 hours we expect the big doji
+    trg_future_dir_changes = Column(Integer)
+    trg_is_flat = Column(Integer)
+    trg_is_trend = Column(Integer)
+    trg_is_chaos_1h = Column(Integer)
+    trg_is_chaos_3h = Column(Integer)
+    trg_is_chaos_6h = Column(Integer)
+    trg_is_chaos_24h = Column(Integer)
+
+    __table_args__ = (
+        UniqueConstraint("rounded_date", "ticker", name="uq_predictions_date_ticker"),
+    )
 
 
-class UserSubscription(Base):
+class UserSubscriptions(Base):
     __tablename__ = 'user_subscriptions'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -132,5 +143,5 @@ class UserSubscription(Base):
     chat_id = Column(Integer)
     subscribed_to_alerts = Column(Boolean, default=True)
     subscribed_to_daily_summary = Column(Boolean, default=False)
-    user_tz = Column(String, default='Europe/Moscow')  # TODO: CHANGE WHEN BUILD THE APP
+    user_tz = Column(String, default='Etc/UTC')
     created_at = Column(DateTime, default=func.now())

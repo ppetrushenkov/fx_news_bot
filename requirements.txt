@@ -1,3 +1,4 @@
+pytz
 pandas
 APScheduler
 requests
@@ -6,3 +7,5 @@ aiogram
 python-dotenv
 sqlalchemy
 twelvedata
+tqdm
+pandas_ta

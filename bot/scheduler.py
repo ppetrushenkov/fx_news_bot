@@ -1,148 +1,186 @@
-from time import time
-from datetime import datetime
+from __future__ import annotations
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from datetime import timezone, timedelta
+import datetime
+from typing import Optional
 
-from sqlalchemy import func, select
+# from numba.core import event
+# from numpy import delete
+from requests import Session
 
-from db.database import SessionLocal
-from db.models import TodayEconomicNews, TodayEventsAggregated, UserSubscription
+from bot.data_loader import get_economic_events
 from db.data_handler import DBHandler
 
-from ml.predictor import VolatilityPredictor
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.date import DateTrigger
+except Exception:  # pragma: no cover
+    AsyncIOScheduler = None  # type: ignore
+    CronTrigger = None  # type: ignore
+    DateTrigger = None  # type: ignore
 
-from utils import (convert_tz_to_moscow, 
-                   fetch_economic_news, 
-                   custom_datetime_crop_to_closest_half_hour, 
-                   get_datetime_list_to_set_scheduler
-                   )
+import pandas as pd
+from sqlalchemy import text, select, delete
 
 from config import Config
-from app import bot, dp
+from db.database import SessionLocal
+from db.models import Events
 
-import asyncio
-import pandas as pd
+from bot.blocks import update_block
 
-
-# Create session factory for scheduler
-session = SessionLocal()
-
-# Predictor
-predictor = VolatilityPredictor()
+from bot.feature_engineer import _utc_now, _df_standardize_event_dates
 
 
-async def send_alert_to_users(predictions):
-    """Send alert to users if there is some trigger alert."""
-    subscribers = session.query(UserSubscription).all()
-    try:
-        for subscriber in subscribers:
-            bot.send_message(chat_id=subscriber.chat_id, text="There is some trigger alert")
-    except Exception as e:
-        print(f'Error sending alert to users: {e}')
+async def run_ml_prediction_for_upcoming_events() -> None:
+    """
+    Placeholder.
+    Triggered at (event_time - 1 hour). Here you’ll later:
+    - collect all events coming out soon
+    - fetch historical prices for tickers
+    - run ML prediction
+    """
+    print('DO SOME ML')
+    return
 
-# -----------------------------------------+
-#    SCHEDULER: Populate table every day   |
-# -----------------------------------------+
-def populate_database():
-    """Populate database with daily economic news."""
-    db_handler = DBHandler()
-    need_to_update = db_handler.check_if_need_to_update_today_events()
 
-    if not need_to_update:
-        print("There is no need to populate database yet")
-        return
-
-    news_df = fetch_economic_news()
+def _get_tomorrow_event_times_minus_1h() -> list[datetime.datetime]:
+    tomorrow = (_utc_now() + timedelta(days=1)).date()
+    next_day = tomorrow + timedelta(days=1)
+    with SessionLocal() as sess:
+        q = sess.query(Events.date).filter(
+            Events.date >= datetime.datetime.combine(tomorrow, datetime.time.min),
+            Events.date < datetime.datetime.combine(next_day, datetime.time.min)
+        )
+        events = pd.read_sql(q.statement, sess.bind)
     
-    # If news data is not empty, insert into database
-    if news_df.shape[0] > 0:
-        db_handler.write_table_to_database(news_df, TodayEconomicNews.__tablename__)
-        print("Database populated successfully")
+    if events.empty:
+        return []
 
-    # Aggregate news data and write to database
-    print("Populating table with aggregated news...")
-    agg_news = predictor.add_features_for_news(news_df)
-    db_handler.write_table_to_database(df=agg_news, table_name=TodayEventsAggregated.__tablename__)
-    print("Aggregation table populated successfully")
+    events['date'] = pd.to_datetime(events['date'], errors='coerce')
+    events.dropna(subset=['date'], inplace=True)
 
-    print("Set up scheduler for checking the market before news is out")
-    set_multi_hour_scheduler_for_a_day()
-    print("Scheduler set up successfully")
+    rounded_date = events['date'].dt.floor('1h').unique()
+
+    return [
+        (dt.to_pydatetime() if hasattr(dt, "to_pydatetime") else dt) - timedelta(hours=1)
+        for dt in rounded_date
+    ]
 
 
-async def scheduled_everyday_population():
-    """Async function to run database population."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, populate_database)
+def _reschedule_tomorrow_ml_jobs(scheduler: AsyncIOScheduler) -> None:
+    """
+    Ensures we have one-off ML prediction jobs scheduled for tomorrow at (event_time - 1 hour).
+
+    This is intended to be called:
+    - once on startup (optional convenience), and
+    - once per day from the daily scheduler job (required for correctness).
+    """
+    # Remove previously created one-off jobs to avoid accumulating stale schedules.
+    # We use a stable prefix for IDs so cleanup is deterministic.
+    for job in scheduler.get_jobs():
+        if job.id.startswith("ml_before_event_"):
+            scheduler.remove_job(job.id)
+
+    for t in _get_tomorrow_event_times_minus_1h():
+        scheduler.add_job(
+            run_ml_prediction_for_upcoming_events,
+            DateTrigger(run_date=t),
+            id=f"ml_before_event_{t.strftime('%Y%m%d_%H%M')}",
+            replace_existing=True,
+        )
 
 
-def setup_everyday_population_scheduler():
-    """Setup and start the scheduler."""
-    scheduler = AsyncIOScheduler()
-    
-    # Schedule daily news population
+def set_schedulers() -> AsyncIOScheduler:
+    """
+    Block 3:
+    - Weekly scheduler: Sunday 18:00 UTC → weekly_scheduler_job
+    - Daily scheduler: every day 00:05 UTC (Config default) → daily_scheduler_job
+      After daily update, also sets one-off schedulers at (event_time - 1h) for tomorrow.
+    """
+    if AsyncIOScheduler is None or CronTrigger is None or DateTrigger is None:
+        raise RuntimeError("Missing dependency `apscheduler`. Install it to run schedulers.")
+
+    scheduler = AsyncIOScheduler(timezone=timezone.utc)
+
+    # Weekly: Sunday 18:00 UTC
     scheduler.add_job(
-        scheduled_everyday_population,
-        CronTrigger(hour=Config.NEWS_UPDATE_HOUR, minute=Config.NEWS_UPDATE_MINUTE),
-        id='daily_news_population'
+        weekly_scheduler_job,
+        CronTrigger(day_of_week="sun", hour=18, minute=0, timezone=timezone.utc),
+        id="weekly_update_sun_1800_utc",
+        replace_existing=True,
     )
-    
+
+    # Daily: by config (UTC)
+    scheduler.add_job(
+        daily_scheduler_job,
+        CronTrigger(hour=Config.NEWS_UPDATE_HOUR, minute=Config.NEWS_UPDATE_MINUTE, timezone=timezone.utc),
+        id="daily_update_tomorrow_events",
+        kwargs={"scheduler": scheduler},
+        replace_existing=True,
+    )
+
+    # Convenience: also schedule tomorrow's one-off jobs immediately on startup.
+    # The daily job will re-create these each day.
+    _reschedule_tomorrow_ml_jobs(scheduler)
+
     scheduler.start()
     return scheduler
 
 
-# ---------------------------------------------+
-#    SCHEDULER: Check the market before news   |
-# ---------------------------------------------+
-def check_the_market() -> pd.DataFrame:
-    """Pipeline function to check the market before news is out.
-    It will return the Pandas dataframe with predictions for every ticker.
+def weekly_scheduler_job(
+    *,
+    countries: Optional[list[str]] = None,
+    tickers: Optional[list[str]] = None,
+    prices_interval: str = "1h",
+    prices_outputsize: int = 1200,
+) -> None:
     """
-    db_handler = DBHandler()
-    events = db_handler.get_aggregated_events_for_coming_hour()
-    prices = db_handler.get_last_prices()
-    predictions = predictor.get_predictions(events, prices)
-    
-    return predictions
-
-
-async def check_the_market_and_alert_the_users():
-    """Function to check the market when the news are coming.
-    If there is some trigger alert, the bot notify you about it."""
-    print('[INFO] Ready to check the market')
-    predictions = check_the_market()
-
-    # Alert if predictions are not empty
-    if len(predictions) > 0:
-        print('[INFO] Alert the users')
-        await send_alert_to_users(predictions)
-
-
-async def scheduled_check_the_market():
-    """Async function to check the market berore news is out."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, check_the_market_and_alert_the_users)
-
-
-def set_multi_hour_scheduler_for_a_day():
+    Weekly (Sunday 18:00 UTC):
+    - Refresh FutureEvents for next week
+    - Move already released events to PastEvents
+    - Update Prices
+    - Populate EventRanges for the week
     """
-    Setup and start the scheduler on the specific times, right 30min (can be also set on 1hour)
-    before the event is out.
+    update_block(
+        countries=countries,
+        tickers=tickers,
+        prices_interval=prices_interval,
+        prices_outputsize=prices_outputsize,
+    )
+    return
+
+
+def daily_scheduler_job(
+    *,
+    scheduler: AsyncIOScheduler,
+) -> None:
     """
-    data_retriever = DBHandler()
-    df = data_retriever.get_events_for_today()
-    times_before_events = get_datetime_list_to_set_scheduler(df['date'], delta='30min')
+    Daily:
+    - Refresh events for tomorrow;
+    - Create one-off schedulers at (event_time - 1h) aggregated by time
+    """
+    db = DBHandler()
+    # 1. Get events for tomorrow
+    now = _utc_now()
+    start_date = (now + timedelta(days=1)).date()
+    end_date = start_date + timedelta(days=1)
 
-    print('The scheduler will be set on this times: \n', '\n'.join(times_before_events))
+    events_for_tomorrow = get_economic_events(
+        start_date=start_date.strftime("%Y-%m-%d"),
+        end_date=end_date.strftime("%Y-%m-%d"),
+    )
+    events_for_tomorrow = _df_standardize_event_dates(events_for_tomorrow)
 
-    multi_hour_scheduler = AsyncIOScheduler()
-    for sch_time in times_before_events:
-        multi_hour_scheduler.add_job(
-            scheduled_check_the_market,
-            CronTrigger(hour=sch_time.hour, minute=sch_time.minute),
-            run_date=sch_time.date,
-            id=f'daily_news_population_{str(int(time()))}'
+    # 2. Replace old events with fresh ones
+    with SessionLocal() as sess:
+        q = delete(Events).where(Events.date == start_date)
+        sess.execute(q)
+
+        events_for_tomorrow.to_sql(
+            Events.__tablename__, sess.bind, if_exists='append', index=False
         )
-    multi_hour_scheduler.start()
-    return multi_hour_scheduler
+        
+        sess.commit()
+
+    _reschedule_tomorrow_ml_jobs(scheduler)

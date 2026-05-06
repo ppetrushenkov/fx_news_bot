@@ -1,6 +1,11 @@
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+
+from sqlalchemy import create_engine, func
+from sqlalchemy.orm import sessionmaker
+from bot.data_loader import get_events_till_next_sunday
+from db.models import Base, Events, Prices
 
 
 def convert_tz_to_moscow(dt: pd.Series):
@@ -55,7 +60,7 @@ def fetch_economic_news_for_two_days() -> pd.DataFrame:
     return fetch_economic_news(2)
 
 def fetch_economic_news_for_a_week() -> pd.DataFrame:
-    return fetch_economic_news(5)
+    return fetch_economic_news(7)
 
 
 def custom_datetime_crop(self, dtime: pd.Series, aggregation_time: str = '30min'):
@@ -91,3 +96,48 @@ def get_datetime_list_to_set_scheduler(event_times: pd.Series, delta: str = '30m
     unique_dates = crop_dates.unique()
     unique_dates_shifted = unique_dates - pd.Timedelta(delta)
     return unique_dates_shifted
+
+def get_max_date_from_table(table: Base):
+    """
+    Gets the max date from the passed table using SQLAlchemy.
+    Returns a tuple: (min_date, max_date)
+    """
+    engine = create_engine('sqlite:///forex_news_bot.db')
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        max_date = session.query(
+            func.max(table.date)
+        ).first()
+        return max_date
+    finally:
+        session.close()
+
+
+def get_next_sunday_date() -> date:
+    """
+    Returns the date of the next Sunday.
+    If today is Sunday, returns the date of the following Sunday (next week).
+    """
+    today = datetime.now().date()
+    # weekday(): Monday is 0, Sunday is 6
+    days_ahead = 6 - today.weekday()
+    if days_ahead == 0:
+        # Today is Sunday, so add 7 days
+        next_sunday = today + timedelta(days=7)
+    else:
+        # Otherwise, add days to reach next Sunday
+        next_sunday = today + timedelta(days=days_ahead)
+    return next_sunday
+
+
+def get_prev_sunday_date() -> date:
+    """
+    Returns the date of the previous Sunday.
+    If today is Sunday, returns the date of the previous Sunday (last week).
+    """
+    today = datetime.now().date()
+    # Monday is 0, Sunday is 6
+    days_since_sunday = (today.weekday() + 1) % 7
+    prev_sunday = today - timedelta(days=days_since_sunday)
+    return prev_sunday

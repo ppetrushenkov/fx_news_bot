@@ -1,162 +1,16 @@
-from economy_classes import CLASS_KEYWORDS
-
-import re
 import pandas as pd
 import numpy as np
 
-
-def extract_speaker_major_and_name(speaker: str) -> pd.DataFrame:
-    """
-    Extract the major (organization/institution) and name from Speaker column.
-    
-    Parameters
-    ----------
-    speaker : str
-        Speaker string from news dataframe (e.g., "ECB President Jean-Claude Trichet;")
-    
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with two columns: 'Major' and 'Name'
-    """
-    if pd.isna(speaker) or speaker is None or speaker == '':
-        return pd.DataFrame({'Major': [None], 'Name': [None]})
-    
-    # Remove trailing semicolon and whitespace
-    speaker = str(speaker).strip().rstrip(';').strip()
-    
-    # Common central bank organizations and their variations (ordered by specificity)
-    organizations = {
-        'FED': ['Federal Reserve Bank of New York', 'Federal Reserve Bank', 'Federal Reserve', 'Fed', 'FOMC'],
-        'ECB': ['ECB', 'European Central Bank'],
-        'BOJ': ['BOJ', 'Bank of Japan'],
-        'BOE': ['BOE', 'Bank of England'],
-        'RBA': ['RBA', 'Reserve Bank of Australia'],
-        'RBNZ': ['RBNZ', 'Reserve Bank of New Zealand'],
-        'BOC': ['BOC', 'Bank of Canada'],
-        'SNB': ['SNB', 'Swiss National Bank'],
-        'PBOC': ['PBOC', 'People\'s Bank of China'],
-    }
-    
-    # Common titles (ordered by length to match longer titles first)
-    titles = ['Governor and Chairman', 'Vice President', 'Deputy Governor', 
-              'President', 'Chairman', 'Chair', 'Governor', 'Member']
-    
-    major = None
-    name = None
-    
-    # Step 1: Identify organization
-    speaker_upper = speaker.upper()
-    for org_key, org_variations in organizations.items():
-        # Check variations from longest to shortest
-        sorted_variations = sorted(org_variations, key=len, reverse=True)
-        for variation in sorted_variations:
-            if variation.upper() in speaker_upper:
-                major = org_key
-                break
-        if major:
-            break
-    
-    # Step 2: Find title position
-    title_found = None
-    title_pos = -1
-    for title in titles:
-        title_lower = title.lower()
-        if title_lower in speaker.lower():
-            title_pos = speaker.lower().find(title_lower)
-            title_found = title
-            break
-    
-    # Step 3: Extract name (comes after title)
-    if title_found and title_pos >= 0:
-        # Get text after title
-        after_title = speaker[title_pos + len(title_found):].strip()
-        
-        if after_title:
-            # Extract name pattern: capitalized words (1-3 words, may include hyphens)
-            # Pattern: Start with capitalized word, may have hyphenated part, may have another capitalized word
-            name_match = re.match(r'^([A-Z][a-z]+(?:-[A-Z][a-z]+)?(?:\s+[A-Z][a-z]+)?)', after_title)
-            if name_match:
-                potential_name = name_match.group(1).strip()
-                
-                # Filter out common words that aren't names
-                exclude_words = {'And', 'The', 'Of', 'To', 'In', 'At', 'On', 'Bank', 
-                               'Federal', 'Reserve', 'European', 'Central', 'England', 
-                               'Japan', 'Australia', 'New', 'Zealand', 'Canada', 
-                               'Swiss', 'National', 'People', 'York'}
-                
-                name_words = potential_name.split()
-                # Check if all words are valid name components
-                if all(word not in exclude_words for word in name_words):
-                    name = potential_name.rstrip('.,;:')
-    
-    # Step 4: If no organization found but title exists, try to infer from context
-    if not major and title_found:
-        # Look for organization before title
-        before_title = speaker[:title_pos].strip() if title_pos > 0 else ''
-        if before_title:
-            # Try to match known organizations
-            for org_key, org_variations in organizations.items():
-                for variation in org_variations:
-                    if variation.upper() in before_title.upper():
-                        major = org_key
-                        break
-                if major:
-                    break
-            
-            # If still no match, use first significant capitalized word as major
-            if not major:
-                words = before_title.split()
-                for word in words:
-                    if word and word[0].isupper() and word.isalpha():
-                        # Skip common words
-                        if word.lower() not in ['the', 'of', 'and']:
-                            major = word
-                            break
-    
-    # Step 5: If still no major, use first significant capitalized word
-    if not major:
-        words = speaker.split()
-        skip_words = {'and', 'the', 'of', 'to', 'in', 'at', 'on'}
-        for word in words:
-            if word and word[0].isupper() and word.lower() not in skip_words:
-                major = word
-                break
-    
-    return pd.DataFrame({'Major': [major], 'Name': [name]})
+from ml.source_categories import SOURCE_CATS
+from ml.event_categories import CLASS_KEYWORDS, EVENT_WEIGHTS_D
 
 
-def extract_speaker_features(news_df: pd.DataFrame, speaker_col: str = 'Speaker') -> pd.DataFrame:
-    """
-    Extract speaker major and name features from news dataframe.
-    
-    Parameters
-    ----------
-    news_df : pd.DataFrame
-        News dataframe containing Speaker column
-    speaker_col : str, default 'Speaker'
-        Name of the column containing speaker information
-    
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with two columns: 'Major' and 'Name'
-    """
-    if speaker_col not in news_df.columns:
-        raise ValueError(f"Column '{speaker_col}' not found in dataframe")
-    
-    results = news_df[speaker_col].apply(extract_speaker_major_and_name)
-    result_df = pd.concat(results.tolist(), ignore_index=True)
-    
-    return result_df
-
-
-def classify_news(title: str):
-    title = str(title).lower()
-    scores = {}
-
-    for cls, keywords in CLASS_KEYWORDS.items():
-        scores[cls] = sum(1 for k in keywords if k in title)
+def classify_by_dict(d: dict, source: str) -> str:
+    source = str(source).lower()
+    scores = {k: 0 for k in d.keys()}
+    for sk, sv in d.items():
+        overlaps = sum([i in source for i in sv])
+        scores[sk] = overlaps
 
     if max(scores.values()) == 0:
         return "OTHER"
@@ -164,182 +18,239 @@ def classify_news(title: str):
     return max(scores, key=scores.get)
 
 
-def classify_event_type(title: str) -> str:  # or classify_high_impact_events
-    t = title.lower()
-
-    if "non farm" in t or "nonfarm" in t:
-        return "NFP"
-    if "cpi" in t and "core" in t:
-        return "CORE_CPI"
-    if "cpi" in t:
-        return "CPI"
-    if "pce" in t:
-        return "PCE"
-    if "fomc" in t and "rate" in t:
-        return "FOMC_RATE"
-    if "fomc" in t and "press" in t:
-        return "FOMC_PRES_CONF"
-    if "pmi" in t and "manufacturing" in t:
-        return "PMI_MANUFACTURING"
-    if "pmi" in t and "services" in t:
-        return "PMI_SERVICES"
-    if "gdp" in t:
-        return "GDP"
-    if "retail" in t:
-        return "RETAIL_SALES"
-
-    return "OTHER"
+def classify_multi(d: dict, row: pd.Series) -> dict:
+    row = str(row).lower()
+    
+    result = {}
+    for sk, sv in d.items():
+        overlaps = sum([kw in row for kw in sv])
+        # result[sk] = int(overlaps > 0)  # 1 если есть хотя бы одно совпадение
+        result[sk] = overlaps
+    
+    return result
 
 
-def period_extraction(period):
-    period = str(period).lower()
-    months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    months = [i.lower() for i in months]
-    quarters = ['q1', 'q2', 'q3', 'q4']
+def extract_period(period):
+    """Return 'Q' and 'M' periods"""
+    period = str(period).upper()
+    months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+    quarters = ['Q1', 'Q2', 'Q3', 'Q4']
 
     if any([i for i in months if i in period]):
         return 'M'
-
+    
     elif any([i for i in quarters if i in period]):
         return 'Q'
-
+    
     else:
         return None
 
 
-def floor_or_ceil(x: str):
+def extract_stage_release(title: pd.Series) -> pd.Series:
+    """Return 'Preliminary', 'Flash', 'Final' stage of release from the title."""
+    title = str(title).upper()
+    if 'PREL' in title:
+        return 'Preliminary'
+    if 'FLASH' in title:
+        return 'Flash'
+    if 'FINAL' in title:
+        return 'Final'
+    return None
+
+
+def extract_calculation_period(title: pd.Series) -> pd.Series:
+    title = str(title).upper()
+    if 'MOM' in title:
+        return 'MoM'
+    if 'QOQ' in title:
+        return 'QoQ'
+    if 'YOY' in title:
+        return 'YoY'
+    return None
+
+
+def get_report_period(ser: pd.Series):
+    pass
+
+
+def get_most_important_events(title: pd.Series):
+    title = str(title).upper()
+    
+    # Priority mappings for specific events
+    if 'BALANCE OF TRADE' in title:
+        return 'Balance_of_Trade'
+    if 'CPI' in title or 'INFLATION RATE' in title or 'PPI' in title:
+        if 'CORE' in title:
+            return 'Core_Inflation_rate'
+        return 'Inflation_rate'
+    if 'INTEREST RATE DECISION' in title or 'DEPOSIT FACILITY RATE' in title:
+        return 'Interest_Rate_Decision'
+    if 'NON FARM PAYROLLS' in title or 'NONFARM PAYROLLS' in title:
+        return 'NFP'
+    if 'GDP' in title:
+        return 'GDP'
+    if 'FOMC' in title:
+        return 'FOMC'
+    if 'PMI' in title:
+        if 'MANUFACTURING' in title:
+            return 'PMI_Manufacturing'
+        if 'SERVICES' in title:
+            return 'PMI_Services'
+        return 'PMI'
+    if 'RETAIL SALES' in title:
+        return 'Retail_Sales'
+    if 'UNEMPLOYMENT RATE' in title:
+        return 'Unemployment_rate'
+    
+    return None
+
+
+def extract_news_features_pipeline(data: pd.DataFrame):
+    # Add category dummies
+    data = pd.get_dummies(data, columns=['category'], prefix='category', prefix_sep='_', dtype=int)
+    print('[INFO] Category dummies added.')
+
+    # Add currency dummies
+    data = pd.get_dummies(data, columns=['currency'], prefix='currency', prefix_sep='_', dtype=int)
+    print('[INFO] Currency dummies added.')
+
+    # Add country dummies
+    data = pd.get_dummies(data, columns=['country'], prefix='country', prefix_sep='_', dtype=int)
+    print('[INFO] Country dummies added.')
+
+    # Add source dummies
+    data['source'] = data['source'].apply(lambda x: classify_by_dict(SOURCE_CATS, x))
+    data = pd.get_dummies(data, columns=['source'], prefix='source', prefix_sep='_', dtype=int)
+    print('[INFO] Source dummies added.')
+
+    # Add event category
+    multi_labels = data['title'].apply(lambda x: classify_multi(CLASS_KEYWORDS, str(x).lower()))
+    multi_df = pd.DataFrame(list(multi_labels))
+    data = pd.concat([data, multi_df.add_prefix('event_')], axis=1)
+    print('[INFO] Event category dummies added.')
+
+    # Add stage release dummies
+    data['stage_release'] = data['title'].apply(extract_stage_release)
+    data = pd.get_dummies(data, columns=['stage_release'], prefix='stage_release', prefix_sep='_', dtype=int)
+    print('[INFO] Stage release dummies added.')
+
+    # Add event type dummies
+    data['calc_period'] = data['title'].apply(extract_calculation_period)
+    data = pd.get_dummies(data, columns=['calc_period'], prefix='calc_period', prefix_sep='_', dtype=int)
+    print('[INFO] Event calculation period dummies added.')
+
+    # Add scale
+    data = pd.get_dummies(data, columns=['scale'], prefix='scale', prefix_sep='_', dtype=int)
+    print('[INFO] Scale dummies added.')
+
+    # Add most important events
+    data['most_important_event'] = data['title'].apply(get_most_important_events)
+    data['mie'] = data['most_important_event'].copy()
+    data = pd.get_dummies(data, columns=['most_important_event'], prefix='mie', prefix_sep='_', dtype=int)
+    print('[INFO] Most important event dummies added.')
+
+    # Add calendar flag
+    data['is_calendar'] = data['indicator'].apply(lambda x: 1 if x == 'Calendar' else 0)
+    print('[INFO] Flag "is_calendar" added.')
+
+    # Add president flag
+    data['is_president'] = data['title'].apply(lambda x: 1 if 'president' in x.lower() else 0)
+    print('[INFO] Flag "is_president" added.')
+
+    # Add president flag
+    data['is_election'] = data['title'].apply(lambda x: 1 if 'election' in x.lower() else 0)
+    print('[INFO] Flag "is_election" added.')
+
+    # # Add time from last reference date  (it difficult to split reference date on days, weeks, monthes, because these values are various)
+    # data['referenceDate'] = pd.to_datetime(data['referenceDate'])
+    # data['days_from_last_ref_date'] = ((data['date'] - data['referenceDate']).dt.days).abs()
+    # data['report_period'] = data['days_from_last_ref_date'].apply(get_report_period)
+    # print('[INFO] Time from last reference date added.')
+
+    # Remove "OTHER" columns and redundant columns
+    other_columns = [i for i in data.columns if i.endswith('OTHER')]
+    data = data.drop(columns=other_columns + ['source_url'])
+    print('[INFO] Removed "OTHER" and redundant columns.')
+
+    return data
+
+
+def floor_or_ceil(x: str, freq: str='h'):
     """
     Если значения минут ближе к 30 или 00, значит округляем в большую сторону, иначе в меньшую.
     """
     x_dt = pd.to_datetime(x)
-    if (29 >= x_dt.minute >= 20) or (59 >= x_dt.minute >= 50):  # TODO: May be change to last 5 minutes (20 -> 25 and 50 -> 55)
-        return x_dt.ceil('30min', ambiguous='NaT', nonexistent='shift_forward')
-    else:
-        return x_dt.floor('30min')
+    if freq == '30min':
+        if (29 >= x_dt.minute >= 20) or (59 >= x_dt.minute >= 50):  # TODO: May be change to last 5 minutes (20 -> 25 and 50 -> 55)
+            return x_dt.ceil(freq, ambiguous='NaT', nonexistent='shift_forward')
+        else:
+            return x_dt.floor(freq)
+    elif freq == 'h':
+        if x_dt.minute <= 29:
+            return x_dt.floor(freq, ambiguous='NaT', nonexistent='shift_forward')
+        else:
+            return x_dt.ceil(freq, ambiguous='NaT', nonexistent='shift_forward')
+    return None
 
 
-def build_hour_features(
-        news_df: pd.DataFrame,
-        key_event_types: set[str] | None = None,
-        event_time_column: str = 'custom_event_time'
-) -> pd.DataFrame:
-    """
-    Build hour-level aggregated features from event-level news dataframe.
+def get_max_weight_event(x: pd.DataFrame, mie_col: str = 'mie'):
+    x.reset_index(inplace=True, drop=True)
+    return x.loc[x['weights'].argmax(), mie_col]
 
-    Parameters
-    ----------
-    news_df : pd.DataFrame
-        Event-level news data. Must contain:
-        ['event_hour', 'event_type', 'news_class',
-         'impact_rank', 'is_key_event', 'event_weight']
 
-    key_event_types : list[str], optional
-        List of key event types to build presence flags for
-        (e.g. ['NFP', 'CPI', 'PMI_MANUFACTURING']).
-        If None, inferred from is_key_event == True.
+def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
+    # 1. Basic counts
+    agg = df \
+        .groupby(dt_col) \
+            .agg(
+                news_count=("title", "count"),
+                high_impact_count=("importance", lambda x: (x == 1).sum()),
+                key_event_count=("mie", "count"),
+            )
+    
+    # 2. Main event
+    df['weights'] = df['mie'].apply(lambda x: EVENT_WEIGHTS_D.get(x, 0))
+    main_event = df.groupby('rounded_time')[['weights', 'mie']].apply(lambda x: get_max_weight_event(x, mie_col='mie'))
+    main_event.name = 'main_event'
+    main_event.fillna('No main events', inplace=True)
 
-    Returns
-    -------
-    pd.DataFrame
-        Hour-level feature table indexed by event_hour.
-    """
+    agg = agg.join(main_event, how='left')
 
-    df = news_df.copy()
+    # 3. Add previous and next hour features
+    agg['prev_hour_news_count'] = agg['news_count'].shift(1)
+    agg['next_hour_news_count'] = agg['news_count'].shift(-1)
+    agg['prev_hour_high_impact_count'] = agg['high_impact_count'].shift(1)
+    agg['next_hour_high_impact_count'] = agg['high_impact_count'].shift(-1)
+    agg['prev_hour_main_event'] = agg['main_event'].shift(1)
+    agg['next_hour_main_event'] = agg['main_event'].shift(-1)
 
-    # -----------------------------
-    # 1. BASIC COUNTS & INTENSITY
-    # -----------------------------
-    agg = df.groupby(event_time_column).agg(
-        base_news_count=("event_type", "count"),
-        base_high_impact_count=("impact_rank", lambda x: (x == 2).sum()),
-        base_sum_impact_rank=("impact_rank", "sum"),
-        base_max_impact_rank=("impact_rank", "max"),
-    )
+    
+    # 4. Sum features
+    features = [
+        'category', 'currency', 'country', 'source', 'event_', 
+        'stage_release', 'calc_period', 'is_calendar', 'is_president', 'mie_'
+    ]
+    for ftr in features:
+        ftr_agg_d = {c: 'sum' for c in df.columns if c.startswith(ftr)}
+        feature_sum = df.groupby(dt_col).agg(ftr_agg_d)
+        agg = agg.join(feature_sum, how='left')
+    
+    agg = agg.reset_index()
 
-    # -----------------------------
-    # 2. DOMINANT EVENT TYPE
-    # -----------------------------
-    dominant_event = (
-        df.groupby([event_time_column, "event_type"])
-        .size()
-        .reset_index(name="cnt")
-        .sort_values([event_time_column, "cnt"], ascending=[True, False])
-        .drop_duplicates(event_time_column)
-        .set_index(event_time_column)[["event_type"]]
-        .rename(columns={"event_type": "extra_dominant_event_type"})
-    )
+    # 5. Add what hours left for prev and next event
+    agg['time_passed_from_last_events'] = (agg[dt_col] - agg[dt_col].shift(1)).dt.total_seconds() / (60 * 60 / 2)
+    agg['time_left_to_next_events'] = (agg[dt_col].shift(-1) - agg[dt_col]).dt.total_seconds() / (60 * 60 / 2)
 
-    # -----------------------------
-    # 3. EVENT ENTROPY (STRUCTURAL NOISE)
-    # -----------------------------
-    # def event_entropy(x: pd.Series) -> float:
-    #     probs = x.value_counts(normalize=True)
-    #     return entropy(probs) if len(probs) > 1 else 0.0
-    #
-    # entropy_df = (
-    #     df.groupby(event_time_column)["event_type"]
-    #     .apply(event_entropy)
-    #     .to_frame("event_entropy")
-    # )
+    # 5. Fill Nans for numeric columns
+    num_cols = agg.select_dtypes(include=[np.number]).columns
+    agg[num_cols] = agg[num_cols].fillna(0)
 
-    # -----------------------------
-    # 4. AGG ONE HOT FEATURES
-    # -----------------------------
-    event_agg_dict = {col: 'sum' for col in df.columns if col.startswith('e_')}
-    cat_agg_dict = {col: 'sum' for col in df.columns if col.startswith('cat_')}
-    cur_agg_dict = {col: 'sum' for col in df.columns if col.startswith('cur_')}
-
-    # Perform the groupby and aggregation
-    event_presence_sum = df.groupby(event_time_column).agg(event_agg_dict)
-    category_presence_sum = df.groupby(event_time_column).agg(cat_agg_dict)
-    currency_presence_sum = df.groupby(event_time_column).agg(cur_agg_dict)
-
-    # -----------------------------
-    # 5. FINAL MERGE
-    # -----------------------------
-    hour_features = (
-        agg
-        .join(dominant_event, how="left")
-        # .join(entropy_df, how="left")
-        # .join(presence_df, how="left")
-        .join(event_presence_sum, how="left")
-        .join(category_presence_sum, how="left")
-        .join(currency_presence_sum, how="left")
-        .reset_index()
-    )
-
-    # Fill NaNs (safety)
-    num_cols = hour_features.select_dtypes(include=[np.number]).columns
-    hour_features[num_cols] = hour_features[num_cols].fillna(0)
-
-    hour_features["extra_dominant_event_type"] = (
-        hour_features["extra_dominant_event_type"]
-        .fillna("NONE")
-        .astype("category")
-    )
-
-    # Create field 'Last_key_event_bars_ago' (example last important event was N bars ago and it was NFP)
-    # Find last key event name and how many hours ago it was for each hour row
-
-    # Prepare a mask for rows with actual key events (using is_key_event)
-    key_event_mask = hour_features['extra_dominant_event_type'].isin(key_event_types)
-    key_max_rank_mask = hour_features['base_max_impact_rank'] == 2
-
-    # Build up last key event name using a forward fill
-    hour_features['extra_last_key_event_name'] = (
-        hour_features['extra_dominant_event_type'].where(key_event_mask).shift(1)
-        .ffill()
-    )
-
-    # For time calculations, get event_hour of previous key events
-    last_key_event_time = hour_features[event_time_column].where(key_event_mask).shift(1).ffill()
-    last_max_impact_time = hour_features[event_time_column].where(key_max_rank_mask).shift(1).ffill()
-
-    hour_features['extra_last_key_event_hours_ago'] = (
-            (hour_features[event_time_column] - last_key_event_time).dt.total_seconds() / 3600
-    )
-    hour_features['extra_last_max_impact_hours_ago'] = (
-            (hour_features[event_time_column] - last_max_impact_time).dt.total_seconds() / 3600
-    )
-
-    return hour_features
+    # 6. How long ago was the last key event?
+    key_event_mask = ~agg['main_event'].isna()
+    last_important_event_dt = agg[dt_col].where(key_event_mask).shift(1).ffill()
+    agg['last_important_event_in_hours'] = (agg[dt_col] - last_important_event_dt).dt.total_seconds() / 3600
+    # agg.fillna({'main_event': 'No main events',
+    #             'prev_hour_main_event': 'No main events',
+    #             'next_hour_main_event': 'No main events'}, 
+    #             inplace=True)
+    return agg

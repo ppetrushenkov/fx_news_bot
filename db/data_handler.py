@@ -1,9 +1,10 @@
 from datetime import datetime
+from typing import Literal
 
 from config import Config
 
 from db.database import SessionLocal
-from db.models import TodayEconomicNews, TodayEventsAggregated
+from db.models import Events
 
 from sqlalchemy import func, select
 
@@ -23,66 +24,79 @@ class DBHandler:
     - aggregate events by specified datetime (e.g. 30min or hour);
     - fetch prices from different sources (TwelveData and maybe more);
     """
-    def __init__(self):
-        self.db = SessionLocal()
+    def __init__(self, sess = None):
+        self.sess = sess if sess is not None else SessionLocal()
         self.td = TDClient(apikey=Config.TWELVE_API)
         self.supported_tickers = ['EURUSD', 'GBPUSD', 'USDCHF', 'USDJPY', 'USDCAD', 'AUDUSD', 'NZDUSD']
 
 # +---------------  WRITE  --------------------+ #
-    def write_table_to_database(self, df: pd.DataFrame, table_name: str):
+    def write_into(self, df: pd.DataFrame, table_name: str, if_exists: Literal['replace', 'append'] = 'replace'):
         """Write DataFrame to database."""
         try:
-            df.to_sql(table_name, self.db.bind, if_exists='replace', index=False)
+            df.to_sql(table_name, self.sess.bind, if_exists=if_exists, index=False)
             print(f"Added {len(df)} news items to database")
 
         except Exception as e:
             print(f"Error populating database: {e}")
-            self.db.rollback()
+            self.sess.rollback()
         
-        finally:
-            self.db.close()
+        # finally:
+        #     self.sess.close()
     
-    def populate_aggregation_table(self, events_today: pd.DataFrame):
-        """Populate aggregation table with events for today."""
-        events_today['cropped_datetime'] = custom_datetime_crop(events_today['date'])
-        aggregated_events = events_today.groupby('cropped_datetime').agg({'event': ' '.join})
+    # def populate_aggregation_table(self, events_today: pd.DataFrame):
+    #     """Populate aggregation table with events for today."""
+    #     events_today['cropped_datetime'] = custom_datetime_crop(events_today['date'])
+    #     aggregated_events = events_today.groupby('cropped_datetime').agg({'event': ' '.join})
         
-        self.write_table_to_database(aggregated_events, TodayEventsAggregated.__tablename__)
+    #     self.write_into(aggregated_events, TodayEventsAggregated.__tablename__)
 
 # +---------------  GET  --------------------+ #
     def get_all_records_from_table(self, db_model) -> pd.DataFrame:
         """Select all records from the database and return them as a pandas DataFrame."""
-        query = self.db.query(db_model)
-        return pd.read_sql_query(query.statement, self.db.bind, params=query.statement.compile().params)
+        query = self.sess.query(db_model)
+        return pd.read_sql_query(query.statement, self.sess.bind, params=query.statement.compile().params)
 
     def get_events_for_today(self) -> pd.DataFrame:
         """Get events for today."""
-        events_today = self.get_all_records_from_table(TodayEconomicNews)
+        events_today = self.get_all_records_from_table(Events)
         return events_today
     
-    def get_aggregated_events_for_today(self) -> pd.DataFrame:
-        """Return events for today."""
-        events_today = self.get_all_records_from_table(TodayEventsAggregated)
-        return events_today
-
-    def get_aggregated_events_for_now(self, event_time: str) -> pd.DataFrame:
-        agg_news = self.get_aggregated_events_for_today()
-        upcoming_aggregated_events = agg_news[agg_news['cropped_datetime'] == event_time]
-        return upcoming_aggregated_events
+    # def get_aggregated_events_for_coming_hour(self) -> pd.DataFrame:
+    #     """Return aggregated events for the next hour."""
+    #     now = datetime.now()
+    #     hour_from_now = now + pd.Timedelta(hours=1)
+        
+    #     query = self.sess.query(TodayEventsAggregated).filter(
+    #         TodayEventsAggregated.agg_time >= now,
+    #         TodayEventsAggregated.agg_time <= hour_from_now
+    #     )
+    #     df = pd.read_sql_query(query.statement, self.sess.bind, params=query.statement.compile().params)
+    #     return df
 
     def get_last_prices(self) -> pd.DataFrame:
         """Fetch last prices for supported tickers from Twelve Data source"""
-        # TODO: Define, how may output size do I need for predictions
-        ts = self.td.time_series(
-            symbol=self.supported_tickers,
-            interval="30min",
-            outputsize=15
-        )
-        # Returns pandas.DataFrame
-        prices = ts.as_pandas()
-        prices.reset_index(inplace=True)
-        prices.columns = ['ticker', 'datetime', 'open', 'high', 'low', 'close']
-        return prices
+        # Fetch data for all supported tickers
+        prices_list = []
+        for ticker in self.supported_tickers:
+            try:
+                ts = self.td.time_series(
+                    symbol=ticker,
+                    interval="30min",
+                    outputsize=15
+                )
+                df = ts.as_pandas()
+                df['ticker'] = ticker
+                df.reset_index(inplace=True)
+                # Ensure column names match what the predictor expects
+                df.columns = ['time', 'open', 'high', 'low', 'close', 'ticker']
+                prices_list.append(df)
+            except Exception as e:
+                print(f"Error fetching prices for {ticker}: {e}")
+                
+        if not prices_list:
+            return pd.DataFrame()
+            
+        return pd.concat(prices_list, ignore_index=True)
 
 # +---------------  PREPROCESSING  --------------------+ #
     def unite_events_and_prices(self):
@@ -124,10 +138,10 @@ class DBHandler:
             })
         return predictions
     
-    def check_if_need_to_update_today_events(self) -> bool:
+    def is_need_to_update_today_events(self) -> bool:
         """Return True if current date is not the same as the min date """
-        q = select(func.min(TodayEconomicNews.date))
-        min_date = self.db.execute(q).scalar()  # TODO: check this method or use .scalars().all()[0]
+        q = select(func.min(Events.date))
+        min_date = self.sess.execute(q).scalar()  # TODO: check this method or use .scalars().all()[0]
         min_date = pd.to_datetime(min_date).date()
         date_now = datetime.now().date()
         if min_date == date_now:

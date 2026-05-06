@@ -36,29 +36,18 @@ def get_bar_volatility_gradation(data: pd.DataFrame, n_forward: int = 4) -> pd.S
 #     future_range = future_max - future_min
 #     return future_range
 
-def get_future_range_from_now(data: pd.DataFrame, n_forward: int) -> pd.Series:
+def get_future_range(data: pd.DataFrame, n_forward: int) -> pd.Series:
     channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward)
-    if channel is None:
-        return pd.Series(np.nan, index=data.index)
     channel.columns = ['lower', 'middle', 'upper']
     future_range = channel['upper'] - channel['lower']
     return future_range
 
 
-def get_future_range_from_next_bar(data: pd.DataFrame, n_forward: int) -> pd.Series:
-    channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward-1)
-    if channel is None:
-        return pd.Series(np.nan, index=data.index)
-    channel.columns = ['lower', 'middle', 'upper']
-    future_range = channel['upper'] - channel['lower']
-    return future_range
-
-
-def get_overall_future_range(data: pd.DataFrame, n_forward: int) -> pd.Series:
+def get_overall_future_range(data: pd.DataFrame, n_forward: int):
     return data['trange'].shift(-n_forward).rolling(n_forward).sum()
 
 
-def get_future_custom_efficiency_ratio(data: pd.DataFrame, n_forward: int = 21) -> float:  # TODO: mb add -1 to the -n_forward?
+def get_future_custom_efficiency_ratio(data: pd.DataFrame, n_forward: int = 21) -> float:
     total_range = data.high.shift(-n_forward).rolling(n_forward).max() - data.low.shift(-n_forward).rolling(n_forward).min()
     rng = data.high - data.low
     sum_range = rng.shift(-n_forward).rolling(n_forward).sum()
@@ -177,21 +166,28 @@ def clip_values(ser: pd.Series, up_level: float = None, down_level: float = None
 
 def set_targets(data: pd.DataFrame, look_forward_bars: int):
     """
-    Generate target columns for a price DataFrame to support supervised learning tasks:
-
-    - Volatility classification:
-        - `trg_bar_volatility_expansion_gradation`: Maximum volatility level among the next N bars.
-        - `trg_is_greater_daily_atr`: True if the range over the next N bars exceeds the daily ATR.
-
-    - Range regression:
-        - `trg_future_range_1h`, `trg_future_range_3h`, `trg_future_range_6h`: Predicted price range for the next 1, 3, and 6 hours, respectively.
-
-    - Chaos classification:
-        - `trg_big_doji`: True if a large doji or pin bar occurs in the next 2 hours (body-to-range ratio < 0.2 and size > ATR).
-        - `trg_dir_changes`: Count of direction changes (extreme updates) after an event, a measure of stop hunting.
-        - `trg_is_flat_flg`: 1 if the minimum Kaufman Efficiency Ratio (KER) over the next N bars (N=8–24) is less than 0.1.
-        - `trg_is_trend_flg`: 1 if the maximum KER over the next N bars (N=8–24) is greater than 0.5.
-        - `trg_is_chaos`: Composite label—True if there are multiple direction changes, volatility is more than 3x ATR, and both trend and flat regimes are present.
+    Sets the targets for data. It sets the following targets:
+    (VOLATILITY CLASSIFICATION)
+    - `trg_bar_volatility_expansion_gradation` - возвращает максимальную степень волатильности
+        для любого из следующих N баров;
+    - `trg_is_greater_daily_atr` - возвращает True, если рендж следующих N свечей (в совокупности)
+        формирует диапазон больше Дневного АТРа;  (СПОРНО)
+    (RANGE REGRESSION)
+    - `trg_future_range_n(hour)` - рендж следующих баров:
+        - 1 час;
+        - 3 часа;
+        - 6 часов
+    (CHAOS CLASSIFICATION)
+    - `trg_big_doji` - возвращает True, если в ближайшие 2 часа будет большая Доджи (или пин бар) свеча.
+        По сути свеча с отношением тела ко всей свече ниже 0.2 и размер свечи > АТРа;
+    - `trg_dir_changes` - подсчет количества смен направлений после выхода новости
+        (количество поочередных обновлений экстремумов).
+        Так же может называться как поочередное выбивание стопов в обе стороны;
+    - `trg_is_flat_flg` - минимальное значение KER (Kaufman Efficiency Ratio) на следующих N (от 8 до 24) баров.
+        Должно быть меньше 0.1;
+    - `trg_is_trend_flg` - максимальное значение KER на следующих N (от 8 до 24) баров. Должно быть больше 0.5;
+    - `trg_is_chaos` - комплексная метка, означающая количество смен направлений (trg_dir_changes) > 1,
+        волатильность > 3х АТР и одновременно должно быть и тренд и флэт.
     """
     # Prerequisites
     atr = data['atr']
@@ -209,10 +205,10 @@ def set_targets(data: pd.DataFrame, look_forward_bars: int):
     # volatility_gradation = get_bar_volatility_gradation(data, n_forward=look_forward_bars)
 
     # Volatility Ranges (TARGET #2)
-    volatility_range_1h = get_future_range_from_next_bar(data, n_forward=2)
-    volatility_range_3h = get_future_range_from_next_bar(data, n_forward=6)
-    volatility_range_6h = get_future_range_from_next_bar(data, n_forward=12)
-    volatility_range_24h = get_future_range_from_next_bar(data, n_forward=48)
+    volatility_range_1h = get_future_range(data, n_forward=2)
+    volatility_range_3h = get_future_range(data, n_forward=6)
+    volatility_range_6h = get_future_range(data, n_forward=12)
+    volatility_range_24h = get_future_range(data, n_forward=48)
 
     overall_volatility_1h = get_future_custom_efficiency_ratio(data, n_forward=2)
     overall_volatility_3h = get_future_custom_efficiency_ratio(data, n_forward=6)
