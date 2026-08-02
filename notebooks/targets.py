@@ -6,6 +6,13 @@ from tqdm import tqdm
 from numba import njit
 
 
+# TODO: !!! Добавить Swing Failure (Ложный пробой)
+
+
+def is_swing_failure(data: pd.DataFrame, n_forward: int = 24):
+    return None
+
+
 def get_bar_volatility_gradation(data: pd.DataFrame, n_forward: int = 4) -> pd.Series:
     """Максимальный коэффициент k ∈ {0,…,n_forward} на баре t.
 
@@ -30,14 +37,37 @@ def get_bar_volatility_gradation(data: pd.DataFrame, n_forward: int = 4) -> pd.S
     return pd.Series(grads, index=data.index)
 
 
-# def get_future_range(data: pd.DataFrame, n_forward: int) -> pd.Series:
-#     future_max = data.high.shift(-n_forward).rolling(n_forward).max()
-#     future_min = data.low.shift(-n_forward).rolling(n_forward).min()
-#     future_range = future_max - future_min
-#     return future_range
-
 def get_future_range(data: pd.DataFrame, n_forward: int) -> pd.Series:
     channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward)
+    channel.columns = ['lower', 'middle', 'upper']
+    future_range = channel['upper'] - channel['lower']
+    return future_range
+
+
+def extremum_breakout(data: pd.DataFrame, channel_period: int, future_n: int) -> pd.Series:
+    """Return boolean series if extremum breakout happened in future n hours"""
+    channel = ta.donchian(data.high, data.low, lower_length=channel_period, upper_length=channel_period)
+    channel.columns = ['lower', 'middle', 'upper']
+
+    future_max = data['high'].shift(-future_n).rolling(future_n).max()
+    future_min = data['low'].shift(-future_n).rolling(future_n).min()
+
+    return (future_max > channel['upper']) & (future_min < channel['lower'])
+
+
+def get_future_range_from_now(data: pd.DataFrame, n_forward: int) -> pd.Series:
+    channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward)
+    if channel is None:
+        return pd.Series(np.nan, index=data.index)
+    channel.columns = ['lower', 'middle', 'upper']
+    future_range = channel['upper'] - channel['lower']
+    return future_range
+
+
+def get_future_range_from_next_bar(data: pd.DataFrame, n_forward: int) -> pd.Series:
+    channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward-1)
+    if channel is None:
+        return pd.Series(np.nan, index=data.index)
     channel.columns = ['lower', 'middle', 'upper']
     future_range = channel['upper'] - channel['lower']
     return future_range
@@ -47,12 +77,16 @@ def get_overall_future_range(data: pd.DataFrame, n_forward: int):
     return data['trange'].shift(-n_forward).rolling(n_forward).sum()
 
 
-def get_future_custom_efficiency_ratio(data: pd.DataFrame, n_forward: int = 21) -> float:
+def get_future_custom_efficiency_ratio(data: pd.DataFrame, n_forward: int = 21) -> pd.Series:
     total_range = data.high.shift(-n_forward).rolling(n_forward).max() - data.low.shift(-n_forward).rolling(n_forward).min()
     rng = data.high - data.low
     sum_range = rng.shift(-n_forward).rolling(n_forward).sum()
     return sum_range / (total_range + 1e-6)
     # sum_range = data.trange.shift(-n_forward).rolling(n_forward).sum()
+
+
+def get_future_adx(adx: pd.Series, n_forward: int = 24) -> pd.Series:
+    return adx.shift(-n_forward).rolling(n_forward).apply(lambda x: x.max() if any(x > 30) else x.min())
 
 
 def get_big_wick_candles(
@@ -61,8 +95,20 @@ def get_big_wick_candles(
     wick_ratio: float = 0.5,
     atr_coef: float = 1
 ) -> pd.Series:
-    """1 на баре t, если среди следующих n_forward баров (t+1 … t+n_forward) есть свеча с
-    true range > ATR и малым телом: |open−close| / trange < wick_ratio."""
+    """Returns a binary series indicating whether the candle has a big wick.
+
+    A candle is considered to have a big wick if the ratio of the body to the total range (trange)
+    is less than the given wick_ratio and the trange is greater than the atr multiplied by atr_coef.
+
+    Parameters:
+        data (pd.DataFrame): The input DataFrame containing 'open', 'high', 'low' and 'close' columns.
+        n_forward (int, optional): Number of forward bars to consider for the big wick condition. Defaults to 4.
+        wick_ratio (float, optional): The ratio threshold for considering a wick as big. Defaults to 0.5.
+        atr_coef (float, optional): The coefficient to multiply the ATR by when checking if trange is large enough. Defaults to 1.
+
+    Returns:
+        pd.Series: A binary series where 1 indicates a candle with a big wick and 0 indicates otherwise.
+    """
     tr = data.trange
     atr = data.atr
 
@@ -164,75 +210,58 @@ def clip_values(ser: pd.Series, up_level: float = None, down_level: float = None
     return ser.clip(lower=down_level, upper=up_level)
 
 
+def classify_trend_or_flat(adx: pd.Series, n_forward: int, trend_thresh: int, flat_thresh: int):
+    max_adx = adx.shift(-n_forward).rolling(n_forward).max()
+    min_adx = adx.shift(-n_forward).rolling(n_forward).min()
+
+    return np.where(max_adx > trend_thresh, 'Trend', np.where(min_adx < flat_thresh, 'Flat', 'None'))
+
+
 def set_targets(data: pd.DataFrame, look_forward_bars: int):
-    """
-    Sets the targets for data. It sets the following targets:
-    (VOLATILITY CLASSIFICATION)
-    - `trg_bar_volatility_expansion_gradation` - возвращает максимальную степень волатильности
-        для любого из следующих N баров;
-    - `trg_is_greater_daily_atr` - возвращает True, если рендж следующих N свечей (в совокупности)
-        формирует диапазон больше Дневного АТРа;  (СПОРНО)
-    (RANGE REGRESSION)
-    - `trg_future_range_n(hour)` - рендж следующих баров:
-        - 1 час;
-        - 3 часа;
-        - 6 часов
-    (CHAOS CLASSIFICATION)
-    - `trg_big_doji` - возвращает True, если в ближайшие 2 часа будет большая Доджи (или пин бар) свеча.
-        По сути свеча с отношением тела ко всей свече ниже 0.2 и размер свечи > АТРа;
-    - `trg_dir_changes` - подсчет количества смен направлений после выхода новости
-        (количество поочередных обновлений экстремумов).
-        Так же может называться как поочередное выбивание стопов в обе стороны;
-    - `trg_is_flat_flg` - минимальное значение KER (Kaufman Efficiency Ratio) на следующих N (от 8 до 24) баров.
-        Должно быть меньше 0.1;
-    - `trg_is_trend_flg` - максимальное значение KER на следующих N (от 8 до 24) баров. Должно быть больше 0.5;
-    - `trg_is_chaos` - комплексная метка, означающая количество смен направлений (trg_dir_changes) > 1,
-        волатильность > 3х АТР и одновременно должно быть и тренд и флэт.
-    """
     # Prerequisites
     atr = data['atr']
 
-    # er = custom_efficiency_ratio(data, window=period)
-    er = data['custom_efficiency_ratio']
-    er25 = er.quantile(0.25)
-    er75 = er.quantile(0.75)
-    # er90 = er.quantile(0.90)
+    # er = data['custom_efficiency_ratio']
+    # er25 = er.quantile(0.25)
+    # er75 = er.quantile(0.75)
 
-    max_future_efficiency = er.shift(-look_forward_bars).rolling(look_forward_bars).max()
-    min_future_efficiency = er.shift(-look_forward_bars).rolling(look_forward_bars).min()
-
-    # Volatility Bar Gradation (TARGET #1)  DO NOT NEED THIS BECAUSE OF THE TARGET 2
-    # volatility_gradation = get_bar_volatility_gradation(data, n_forward=look_forward_bars)
+    # max_future_efficiency = er.shift(-look_forward_bars).rolling(look_forward_bars).max()
+    # min_future_efficiency = er.shift(-look_forward_bars).rolling(look_forward_bars).min()
 
     # Volatility Ranges (TARGET #2)
-    volatility_range_1h = get_future_range(data, n_forward=2)
-    volatility_range_3h = get_future_range(data, n_forward=6)
-    volatility_range_6h = get_future_range(data, n_forward=12)
-    volatility_range_24h = get_future_range(data, n_forward=48)
+    future_range_1h = get_future_range_from_next_bar(data, n_forward=1)
+    future_range_3h = get_future_range_from_next_bar(data, n_forward=3)
+    future_range_6h = get_future_range_from_next_bar(data, n_forward=6)
+    future_range_24h = get_future_range_from_next_bar(data, n_forward=24)
 
-    overall_volatility_1h = get_future_custom_efficiency_ratio(data, n_forward=2)
-    overall_volatility_3h = get_future_custom_efficiency_ratio(data, n_forward=6)
-    overall_volatility_6h = get_future_custom_efficiency_ratio(data, n_forward=12)
-    overall_volatility_24h = get_future_custom_efficiency_ratio(data, n_forward=48)
+    future_range_1h /= atr
+    future_range_3h /= atr
+    future_range_6h /= atr
+    future_range_24h /= atr
 
-    # Chaos classification
+    future_range_1h = clip_values(future_range_1h, up_level=10)
+    future_range_3h = clip_values(future_range_3h, up_level=15)
+    future_range_6h = clip_values(future_range_6h, up_level=20)
+    future_range_24h = clip_values(future_range_24h, up_level=25)
+
+    # Overall volatility (sum of ranges)
+    overall_volatility_1h = get_future_custom_efficiency_ratio(data, n_forward=1)
+    overall_volatility_3h = get_future_custom_efficiency_ratio(data, n_forward=3)
+    overall_volatility_6h = get_future_custom_efficiency_ratio(data, n_forward=6)
+    overall_volatility_24h = get_future_custom_efficiency_ratio(data, n_forward=24)
+
     ## Big wick candles
-    big_wick_candles = get_big_wick_candles(data, n_forward=look_forward_bars, wick_ratio=0.4, atr_coef=1.5)
+    big_wick_candles = get_big_wick_candles(data, n_forward=6, wick_ratio=0.3, atr_coef=1.5)
     dir_changes = calculate_direction_changes_fast(data, look_forward=look_forward_bars)
+    is_extremum_breakout = extremum_breakout(data, channel_period=24, future_n=look_forward_bars)
+    is_regime = classify_trend_or_flat(data['adx'], n_forward=look_forward_bars, trend_thresh=25, flat_thresh=15)
 
-    # -----------------------------------------------------------------------------------
-    # Set targets
-    # -----------------------------------------------------------------------------------
-    
-    ## Volatility Classification
-    # data['trg_volatility_expansion_gradation'] = volatility_gradation
 
-    # Regression
-    ## Whole range. Predict the whole distance, that the price will reach in the next N (1h, 3h, 6h, 24h) bars.
-    data['trg_future_range_1h'] = clip_values(volatility_range_1h / atr, up_level=10)
-    data['trg_future_range_3h'] = clip_values(volatility_range_3h / atr, up_level=15)
-    data['trg_future_range_6h'] = clip_values(volatility_range_6h / atr, up_level=20)
-    data['trg_future_range_24h'] = clip_values(volatility_range_24h / atr, up_level=25)
+    # Set targets into DataFrame
+    data['trg_future_range_1h'] = future_range_1h
+    data['trg_future_range_3h'] = future_range_3h
+    data['trg_future_range_6h'] = future_range_6h
+    data['trg_future_range_24h'] = future_range_24h
 
     ## Overall range. (SUM of ranges)
     data['trg_overall_future_range_1h'] = overall_volatility_1h
@@ -243,16 +272,18 @@ def set_targets(data: pd.DataFrame, look_forward_bars: int):
     # Chaos classification
     data['trg_big_doji'] = big_wick_candles
     data['trg_dir_changes'] = dir_changes
-    data['trg_is_flat_flg'] = (max_future_efficiency >= er75).astype(int)
-    data['trg_is_trend_flg'] = (min_future_efficiency <= er25).astype(int)
+    data['trg_is_extremum_breakout'] = is_extremum_breakout
+    data['trg_regime'] = is_regime
 
-    data['trg_is_chaos_1h'] = (overall_volatility_1h >= overall_volatility_1h.quantile(0.75))
-    data['trg_is_chaos_3h'] = (overall_volatility_3h >= overall_volatility_3h.quantile(0.75))
-    data['trg_is_chaos_6h'] = (overall_volatility_6h >= overall_volatility_6h.quantile(0.75))
-    data['trg_is_chaos_24h'] = (overall_volatility_24h >= overall_volatility_24h.quantile(0.75))
+    # data['trg_is_flat_flg'] = (max_future_efficiency >= er75).astype(int)
+    # data['trg_is_trend_flg'] = (min_future_efficiency <= er25).astype(int)
 
-    # print('[INFO] Efficiency Ratio (Instrument: {instrument}): {er25}, {er75}'.format(instrument=data['instrument'].iloc[0], er25=er25, er75=er75))
-    # data['trg_is_flat_flg'] = (min_future_efficiency <= er25).astype(int)
-    # data['trg_is_trend_flg'] = (max_future_efficiency >= er75).astype(int)
+    data['trg_is_chaos_1h'] = (overall_volatility_1h >= overall_volatility_1h.quantile(0.5)) & (future_range_1h >= 1) & (dir_changes > 1)
+    data['trg_is_chaos_3h'] = (overall_volatility_3h >= overall_volatility_3h.quantile(0.6)) & (future_range_3h >= 1) & (dir_changes > 1)
+    data['trg_is_chaos_6h'] = (overall_volatility_6h >= overall_volatility_6h.quantile(0.6)) & (future_range_6h >= 2) & (dir_changes > 1)
+    data['trg_is_chaos_24h'] = (overall_volatility_24h >= overall_volatility_24h.quantile(0.75)) & (future_range_24h >= 3) & (dir_changes > 1)
+
+    for trg in ['trg_future_range_1h', 'trg_future_range_3h', 'trg_future_range_6h', 'trg_future_range_24h']:
+        data[trg + '_log'] = data[trg].apply(lambda x: np.log1p(x))
 
     return data

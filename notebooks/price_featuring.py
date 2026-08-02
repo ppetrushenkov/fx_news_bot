@@ -6,6 +6,39 @@ import pandas_ta as ta
 from scipy.stats import entropy
 
 
+def get_trading_session(ticker: str, hour: int, month: int) -> dict:
+    """
+    Determine trading sessions (Europe, USA, Asia) based on ticker, hour, and month,
+    considering daylight saving time (DST).
+    
+    Args:
+        ticker: Currency pair ticker (e.g., 'EURUSD', 'USDJPY')
+        hour: Hour of the day (0-23, UTC)
+        month: Month of the year (1-12)
+    
+    Returns:
+        Dictionary with one-hot encoded sessions: {'europe': 0/1, 'usa': 0/1, 'asia': 0/1}
+    """
+    is_dst = 3 <= month <= 10
+    
+    europe_start = 7 if is_dst else 8
+    europe_end = 16 if is_dst else 17
+    
+    usa_start = 13 if is_dst else 14
+    usa_end = 22 if is_dst else 23
+    
+    asia_start = 0
+    asia_end = 9
+    
+    sessions = {
+        'europe': 1 if europe_start <= hour < europe_end else 0,
+        'usa': 1 if usa_start <= hour < usa_end else 0,
+        'asia': 1 if asia_start <= hour < asia_end else 0
+    }
+    
+    return sessions
+
+
 def get_base_and_quote_currency(pair: str):
     return pair[:-3], pair[-3:]
 
@@ -39,6 +72,11 @@ def relative_range(bar_range: pd.Series, window: int):
 def relative_atr(atr: pd.Series, window: int):
     return (atr - atr.rolling(window*5).mean()) / atr.rolling(window*5).std()
 
+def atr_ratio(op, hi, cl, fast_period: int = 21, slow_period: int = 100):
+    fast_atr = ta.atr(op, hi, cl, fast_period)
+    slow_atr = ta.atr(op, hi, cl, slow_period)
+    return fast_atr / slow_atr
+
 
 def relative_volume(volume: pd.Series, window: int):
     v_mean = volume.rolling(window*5).mean()
@@ -62,26 +100,26 @@ def normalized_bb_width(bb_width, atr):
     return bb_width / atr
 
 
-def add_daily_atr(data: pd.DataFrame, period=14) -> pd.DataFrame:
-    """
-    Добавляет ATR для каждого дня в датафрейме.
-    """
-    data.set_index('time', inplace=True)
-    daily_data = data.resample('D').agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last'
-        }
-    ).dropna()
+# def add_daily_atr(data: pd.DataFrame, period=14) -> pd.DataFrame:
+#     """
+#     Добавляет ATR для каждого дня в датафрейме.
+#     """
+#     data.set_index('datetime', inplace=True)
+#     daily_data = data.resample('D').agg({
+#         'open': 'first',
+#         'high': 'max',
+#         'low': 'min',
+#         'close': 'last'
+#         }
+#     ).dropna()
 
-    data.reset_index(inplace=True)
-    daily_data.reset_index(inplace=True)
+#     data.reset_index(inplace=True)
+#     daily_data.reset_index(inplace=True)
 
-    daily_data['daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
-    data = pd.merge(data, daily_data[['time', 'daily_atr']], on='time', how='left')
-    data['daily_atr'] = data['daily_atr'].ffill()
-    return data
+#     daily_data['daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
+#     data = pd.merge(data, daily_data[['datetime', 'daily_atr']], on='datetime', how='left')
+#     data['daily_atr'] = data['daily_atr'].ffill()
+#     return data
 
 
 def distance_from_sma_normalized(data: pd.DataFrame, period: int = 240):
@@ -123,14 +161,16 @@ def add_time_features(data: pd.DataFrame, dt_col: str):
 
 
 def add_features(data: pd.DataFrame, period: int = 21):
-    data['time'] = pd.to_datetime(data['time'], utc=True)
+    data['datetime'] = pd.to_datetime(data['datetime'], utc=True)
 
     # atr = ta.atr(h, l, c, period)
     h, l, c = data["high"], data["low"], data["close"]
-    data = add_daily_atr(data, period)  # Calculate Daily ATR
+    # data = add_daily_atr(data, period)  # Calculate Daily ATR
 
     data["trange"] = ta.true_range(h, l, c)
     data["atr"] = ta.atr(h, l, c, period)
+    data["adx"], data["di"], data["dmn"] = ta.adx(h, l, c, length=period)
+    
     atr = data["atr"]
 
     # 1. Kaufman Efficiency Ratio
@@ -147,6 +187,9 @@ def add_features(data: pd.DataFrame, period: int = 21):
 
     # 5. Relative ATR
     data["relative_atr"] = relative_atr(atr, window=period)
+
+    # 6. ATR Ratio
+    data["atr_ratio"] = atr_ratio(h, l, c, fast_period=period, slow_period=100)
 
     # 6. BB width
     bb_width = calculate_bb_width(data, window=period)
@@ -166,7 +209,7 @@ def add_features(data: pd.DataFrame, period: int = 21):
     # 9. Текущий бар vs ATR (насколько уже «растянут» рынок)
     data["tr_over_atr"] = data["trange"] / (atr + 1e-9)
 
-    # 10. Реализованная волатильность и всплеск относительно более длинного окна
+    # 10. Realized volatility
     short_w = max(3, period // 3)
     long_w = max(short_w + 1, period * 3)
     rv_s = realized_volatility(c, short_w)
@@ -196,10 +239,20 @@ def add_features(data: pd.DataFrame, period: int = 21):
     data["vvov"] = atr.rolling(period).std() / (atr.rolling(period).mean() + 1e-9)
 
     # 15. Add time features
-    data = add_time_features(data, 'time')
+    data = add_time_features(data, 'datetime')
 
     # 16. Log return
     data['log_return'] = np.log(data['close'] / data['close'].shift(1))
+
+    # 17. Sessions
+    session_data = data.apply(lambda row: get_trading_session(row['ticker'], row['hour'], row['month']), axis=1)
+    data['is_europe'] = session_data.apply(lambda x: x['europe'])
+    data['is_usa'] = session_data.apply(lambda x: x['usa'])
+    data['is_asia'] = session_data.apply(lambda x: x['asia'])
+
+    # 18. Sine and Cosine time features
+    data['cos_hour'] = np.cos(data['hour'] * 2*np.pi/24)
+    data['sin_hour'] = np.sin(data['hour'] * 2*np.pi/24)
 
     return data
 

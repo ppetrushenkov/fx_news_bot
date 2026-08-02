@@ -105,73 +105,57 @@ def get_most_important_events(title: pd.Series):
     return None
 
 
-def extract_news_features_pipeline(data: pd.DataFrame):
-    # Add category dummies
-    data = pd.get_dummies(data, columns=['category'], prefix='category', prefix_sep='_', dtype=int)
-    print('[INFO] Category dummies added.')
+def get_dummies(data: pd.DataFrame, column: str, prefix: str):
+    """Create dummy variables for a single column."""
+    return pd.get_dummies(data, columns=[column], prefix=prefix, prefix_sep='_', dtype=int)
 
-    # Add currency dummies
-    data = pd.get_dummies(data, columns=['currency'], prefix='currency', prefix_sep='_', dtype=int)
-    print('[INFO] Currency dummies added.')
 
-    # Add country dummies
-    data = pd.get_dummies(data, columns=['country'], prefix='country', prefix_sep='_', dtype=int)
-    print('[INFO] Country dummies added.')
-
-    # Add source dummies
+def prepare_for_dummy(data: pd.DataFrame):
+    data['stage_release'] = data['title'].apply(extract_stage_release)
+    data['calc_period'] = data['title'].apply(extract_calculation_period)
     data['source'] = data['source'].apply(lambda x: classify_by_dict(SOURCE_CATS, x))
-    data = pd.get_dummies(data, columns=['source'], prefix='source', prefix_sep='_', dtype=int)
-    print('[INFO] Source dummies added.')
 
     # Add event category
     multi_labels = data['title'].apply(lambda x: classify_multi(CLASS_KEYWORDS, str(x).lower()))
     multi_df = pd.DataFrame(list(multi_labels))
     data = pd.concat([data, multi_df.add_prefix('event_')], axis=1)
-    print('[INFO] Event category dummies added.')
-
-    # Add stage release dummies
-    data['stage_release'] = data['title'].apply(extract_stage_release)
-    data = pd.get_dummies(data, columns=['stage_release'], prefix='stage_release', prefix_sep='_', dtype=int)
-    print('[INFO] Stage release dummies added.')
-
-    # Add event type dummies
-    data['calc_period'] = data['title'].apply(extract_calculation_period)
-    data = pd.get_dummies(data, columns=['calc_period'], prefix='calc_period', prefix_sep='_', dtype=int)
-    print('[INFO] Event calculation period dummies added.')
-
-    # Add scale
-    data = pd.get_dummies(data, columns=['scale'], prefix='scale', prefix_sep='_', dtype=int)
-    print('[INFO] Scale dummies added.')
 
     # Add most important events
     data['most_important_event'] = data['title'].apply(get_most_important_events)
     data['mie'] = data['most_important_event'].copy()
-    data = pd.get_dummies(data, columns=['most_important_event'], prefix='mie', prefix_sep='_', dtype=int)
-    print('[INFO] Most important event dummies added.')
+    data['is_calendar'] = data['indicator'].apply(lambda x: 1 if x == 'Calendar' else 0)
+    
+    for col in ['president', 'election']:
+        data[f"is_{col}"] = data['title'].apply(lambda x: 1 if col in str(x).lower() else 0)
+
+    return data
+
+
+def extract_news_features_pipeline(data: pd.DataFrame):
+    data['stage_release'] = data['title'].apply(extract_stage_release)
+    data['calc_period'] = data['title'].apply(extract_calculation_period)
+    data['source'] = data['source'].apply(lambda x: classify_by_dict(SOURCE_CATS, x))
+
+    # Add event category
+    multi_labels = data['title'].apply(lambda x: classify_multi(CLASS_KEYWORDS, str(x).lower()))
+    multi_df = pd.DataFrame(list(multi_labels))
+    data = pd.concat([data, multi_df.add_prefix('event_')], axis=1)
+
+    # Add most important events
+    data['most_important_event'] = data['title'].apply(get_most_important_events)
+    data['mie'] = data['most_important_event'].copy()
+
+    for col in ['category', 'currency', 'country', 'source', 'stage_release', 'calc_period', 'scale', 'mie']:
+        data = get_dummies(data, column=col, prefix=col)
+
+    for col in ['president', 'election']:
+        data[f"is_{col}"] = data['title'].apply(lambda x: 1 if col in str(x).lower() else 0)
 
     # Add calendar flag
     data['is_calendar'] = data['indicator'].apply(lambda x: 1 if x == 'Calendar' else 0)
-    print('[INFO] Flag "is_calendar" added.')
 
-    # Add president flag
-    data['is_president'] = data['title'].apply(lambda x: 1 if 'president' in x.lower() else 0)
-    print('[INFO] Flag "is_president" added.')
-
-    # Add president flag
-    data['is_election'] = data['title'].apply(lambda x: 1 if 'election' in x.lower() else 0)
-    print('[INFO] Flag "is_election" added.')
-
-    # # Add time from last reference date  (it difficult to split reference date on days, weeks, monthes, because these values are various)
-    # data['referenceDate'] = pd.to_datetime(data['referenceDate'])
-    # data['days_from_last_ref_date'] = ((data['date'] - data['referenceDate']).dt.days).abs()
-    # data['report_period'] = data['days_from_last_ref_date'].apply(get_report_period)
-    # print('[INFO] Time from last reference date added.')
-
-    # Remove "OTHER" columns and redundant columns
-    other_columns = [i for i in data.columns if i.endswith('OTHER')]
-    data = data.drop(columns=other_columns + ['source_url'])
-    print('[INFO] Removed "OTHER" and redundant columns.')
-
+    # Remove redundant columns
+    data = data.drop(columns=[i for i in data.columns if i.lower().endswith('other')] + ['source_url'])
     return data
 
 
@@ -195,7 +179,7 @@ def floor_or_ceil(x: str, freq: str='h'):
 
 def get_max_weight_event(x: pd.DataFrame):
     x.reset_index(inplace=True, drop=True)
-    return x.loc[x['weights'].argmax(), 'mie']
+    return x.loc[x['weights'].argmax(), 'most_important_event']
 
 
 def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
@@ -205,12 +189,12 @@ def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
             .agg(
                 news_count=("title", "count"),
                 high_impact_count=("importance", lambda x: (x == 1).sum()),
-                key_event_count=("mie", "count"),
+                key_event_count=("most_important_event", "count"),
             )
     
     # 2. Main event
-    df['weights'] = df['mie'].apply(lambda x: EVENT_WEIGHTS_D.get(x, 0))
-    main_event = df.groupby('rounded_time')[['weights', 'mie']].apply(get_max_weight_event)
+    df['weights'] = df['most_important_event'].apply(lambda x: EVENT_WEIGHTS_D.get(x, 0))
+    main_event = df.groupby('rounded_time')[['weights', 'most_important_event']].apply(lambda x: get_max_weight_event(x))
     main_event.name = 'main_event'
     main_event.fillna('No main events', inplace=True)
 
@@ -223,17 +207,17 @@ def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
     agg['next_hour_high_impact_count'] = agg['high_impact_count'].shift(-1)
     agg['prev_hour_main_event'] = agg['main_event'].shift(1)
     agg['next_hour_main_event'] = agg['main_event'].shift(-1)
-
     
     # 4. Sum features
     features = [
-        'category', 'currency', 'country', 'source', 'event_', 
+        'category', 'currency', 'country', 'source', 'event', 
         'stage_release', 'calc_period', 'is_calendar', 'is_president', 'mie_'
     ]
     for ftr in features:
         ftr_agg_d = {c: 'sum' for c in df.columns if c.startswith(ftr)}
-        feature_sum = df.groupby(dt_col).agg(ftr_agg_d)
-        agg = agg.join(feature_sum, how='left')
+        feature_sum = df.groupby(dt_col).agg(ftr_agg_d).astype(int)
+        # agg = agg.join(feature_sum, how='left')
+        agg = pd.concat([agg, feature_sum], axis=1)
     
     agg = agg.reset_index()
 
@@ -243,14 +227,16 @@ def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
 
     # 5. Fill Nans for numeric columns
     num_cols = agg.select_dtypes(include=[np.number]).columns
-    agg[num_cols] = agg[num_cols].fillna(0)
+    # agg[num_cols] = agg[num_cols].fillna(0)
+    agg.fillna({c: 0 for c in num_cols}, inplace=True)
 
     # 6. How long ago was the last key event?
     key_event_mask = ~agg['main_event'].isna()
     last_important_event_dt = agg[dt_col].where(key_event_mask).shift(1).ffill()
     agg['last_important_event_in_hours'] = (agg[dt_col] - last_important_event_dt).dt.total_seconds() / 3600
-    # agg.fillna({'main_event': 'No main events',
-    #             'prev_hour_main_event': 'No main events',
-    #             'next_hour_main_event': 'No main events'}, 
-    #             inplace=True)
+
+    # for col in ['news_count', 'high_impact_count', 'key_event_count', 'prev_hour_news_count', 'next_hour_news_count', 
+    #             'time_passed_from_last_events', 'time_left_to_next_events', 'last_important_event_in_hours']:
+    #     agg[col] = agg[col].astype(int, errors='ignore')
+
     return agg
