@@ -1,7 +1,20 @@
-from numpy import integer
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, UniqueConstraint
+# from numpy import integer
+from sqlalchemy import (
+    Column, 
+    Integer, 
+    Numeric, 
+    String, 
+    Boolean, 
+    Float, 
+    DateTime, 
+    Time, 
+    ForeignKey, 
+    UniqueConstraint
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
+
+import datetime
 
 
 Base = declarative_base()
@@ -9,57 +22,33 @@ Base = declarative_base()
 
 class Events(Base):
     __tablename__ = 'events'
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    _id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(Integer)
     title = Column(String, nullable=False)
-    country = Column(String)
+    country = Column(String, nullable=True)
     indicator = Column(String)
-    category = Column(String)
+    category = Column(String, nullable=True)
     period = Column(String)
-    referenceDate = Column(DateTime)
+    referenceDate = Column(DateTime, nullable=True)
     source = Column(String)
     source_url = Column(String)
-    actual = Column(String)
-    previous = Column(String)
-    forecast = Column(String)
-    actualRaw = Column(Float)
-    previousRaw = Column(Float)
-    forecastRaw = Column(Float)
+    actual = Column(Float, nullable=True)
+    previous = Column(Float, nullable=True)
+    forecast = Column(Float, nullable=True)
+    actualRaw = Column(Float, nullable=True)
+    previousRaw = Column(Float, nullable=True)
+    forecastRaw = Column(Float, nullable=True)
     currency = Column(String)
     importance = Column(Integer)
     date = Column(DateTime)
-    ticker = Column(String)
-    unit = Column(String)
-    comment = Column(String)
-    scale = Column(String)
+    ticker = Column(String, nullable=True)
+    unit = Column(String, nullable=True)
+    comment = Column(String, nullable=True)
+    scale = Column(String, nullable=True)
 
-
-
-# class TodayEconomicEvents(Base):
-#     __tablename__ = 'today_economic_events'
-    
-#     id = Column(Integer, primary_key=True, autoincrement=True)
-#     title = Column(String, nullable=False)
-#     country = Column(String)
-#     indicator = Column(String)
-#     category = Column(String)
-#     period = Column(String)
-#     referenceDate = Column(DateTime)
-#     source = Column(String)
-#     source_url = Column(String)
-#     actual = Column(String)
-#     previous = Column(String)
-#     forecast = Column(String)
-#     actualRaw = Column(Float)
-#     previousRaw = Column(Float)
-#     forecastRaw = Column(Float)
-#     currency = Column(String)
-#     importance = Column(Integer)
-#     date = Column(DateTime)
-#     ticker = Column(String)
-#     unit = Column(String)
-#     comment = Column(String)
-#     scale = Column(String)
+    __table_args__ = (
+        UniqueConstraint("event_id", name="uq_event_id"),
+    )
 
 
 class Prices(Base):
@@ -135,13 +124,37 @@ class Predictions(Base):
     )
 
 
-class UserSubscriptions(Base):
-    __tablename__ = 'user_subscriptions'
+class UserSettings(Base):
+    __tablename__ = 'user_settings'
+
+    user_id = Column(Integer, primary_key=True)
+    user_timezone = Column(Numeric(3, 1))
+
+    # --- Alerts settings ---
+    daily_alerts = Column(Boolean, default=False)
+    weekly_alerts = Column(Boolean, default=False)
+    chaos_alerts = Column(Boolean, default=False)
+
+    # --- Time to alert ---
+    daily_alerts_time = Column(Time, default=datetime.time(8, 0))
+    weekly_alerts_time = Column(Time, default=datetime.time(8, 0))
+
+    # --- Importance filters for events ---
+    show_low_importance = Column(Boolean, default=False)
+    show_medium_importance = Column(Boolean, default=False)
+    show_high_importance = Column(Boolean, default=True)
+
+    updated_at = Column(DateTime, default=func.now())
+
+
+# class UserSubscriptions(Base):
+#     __tablename__ = 'user_subscriptions'
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, unique=True)
-    chat_id = Column(Integer)
-    subscribed_to_alerts = Column(Boolean, default=True)
-    subscribed_to_daily_summary = Column(Boolean, default=False)
-    user_tz = Column(String, default='Etc/UTC')
-    created_at = Column(DateTime, default=func.now())
+#     id = Column(Integer, primary_key=True, autoincrement=True)
+#     user_id = Column(Integer, unique=True)
+#     chat_id = Column(Integer)
+#     subscribed_to_alerts = Column(Boolean, default=True)
+#     subscribed_to_daily_summary = Column(Boolean, default=False)
+#     user_tz = Column(String, default='Etc/UTC')
+#     created_at = Column(DateTime, default=func.now())
+

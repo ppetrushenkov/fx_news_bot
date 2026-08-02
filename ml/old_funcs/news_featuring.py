@@ -7,9 +7,7 @@ from ml.event_categories import CLASS_KEYWORDS, EVENT_WEIGHTS_D
 
 def classify_by_dict(d: dict, source: str) -> str:
     source = str(source).lower()
-
     scores = {k: 0 for k in d.keys()}
-    
     for sk, sv in d.items():
         overlaps = sum([i in source for i in sv])
         scores[sk] = overlaps
@@ -181,7 +179,8 @@ def floor_or_ceil(x: str, freq: str='h'):
 
 def get_max_weight_event(x: pd.DataFrame):
     x.reset_index(inplace=True, drop=True)
-    return x.loc[x['weights'].argmax(), 'most_important_event']
+    # return x.loc[x['weights'].argmax(), 'most_important_event']
+    return x.loc[x['weights'].argmax(), 'main_event']
 
 
 def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
@@ -218,7 +217,6 @@ def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
     for ftr in features:
         ftr_agg_d = {c: 'sum' for c in df.columns if c.startswith(ftr)}
         feature_sum = df.groupby(dt_col).agg(ftr_agg_d).astype(int)
-        # agg = agg.join(feature_sum, how='left')
         agg = pd.concat([agg, feature_sum], axis=1)
     
     agg = agg.reset_index()
@@ -229,16 +227,11 @@ def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
 
     # 5. Fill Nans for numeric columns
     num_cols = agg.select_dtypes(include=[np.number]).columns
-    # agg[num_cols] = agg[num_cols].fillna(0)
     agg.fillna({c: 0 for c in num_cols}, inplace=True)
 
     # 6. How long ago was the last key event?
     key_event_mask = ~agg['main_event'].isna()
     last_important_event_dt = agg[dt_col].where(key_event_mask).shift(1).ffill()
     agg['last_important_event_in_hours'] = (agg[dt_col] - last_important_event_dt).dt.total_seconds() / 3600
-
-    # for col in ['news_count', 'high_impact_count', 'key_event_count', 'prev_hour_news_count', 'next_hour_news_count', 
-    #             'time_passed_from_last_events', 'time_left_to_next_events', 'last_important_event_in_hours']:
-    #     agg[col] = agg[col].astype(int, errors='ignore')
 
     return agg

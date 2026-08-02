@@ -1,11 +1,11 @@
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-
-import os
-import sys
-import numpy as np
 import pandas as pd
+import numpy as np
+
+import sys
+import os
 
 from ml.source_categories import SOURCE_CATS
 from ml.event_categories import CLASS_KEYWORDS
@@ -19,7 +19,122 @@ from ml.news_featuring import (
     classify_by_dict
 )
 from ml.price_featuring import add_features, get_base_and_quote_currency
-from ml.targets import set_targets
+# from targets import set_targets
+
+
+# class EventPreprocessingTransformer(BaseEstimator, TransformerMixin):
+#     cols_to_onehot = ['category', 'currency', 'country', 'source', 'stage_release', 'calc_period', 'scale', 'mie']
+
+#     def __init__(self, datetime_crop_method: str = '1st'):
+#         self.datetime_crop_method = datetime_crop_method
+#         self.onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+#         self.final_columns_ = None
+
+#     def _crop_time(self, X: pd.DataFrame) -> pd.DataFrame:
+#         if self.datetime_crop_method == '1st':
+#             X['date'] = pd.to_datetime(X['date'], utc=True)
+#             X['rounded_time'] = X['date'].apply(lambda x: x.floor('1h'))
+#         elif self.datetime_crop_method == '2nd':
+#             X['date'] = pd.to_datetime(X['date'], utc=True)
+#             X['rounded_time'] = X['date'].apply(lambda x: floor_or_ceil(x, freq='h'))
+
+#         return X
+
+#     def _encode_categoricals(self, X: pd.DataFrame, fit: bool = False) -> pd.DataFrame:
+#         events = prepare_for_dummy(X)
+#         cat_data = events[self.cols_to_onehot].astype(str).fillna('missing')
+
+#         if fit:
+#             encoded = self.onehot_encoder.fit_transform(cat_data)
+#         else:
+#             encoded = self.onehot_encoder.transform(cat_data)
+
+#         feature_names = self.onehot_encoder.get_feature_names_out(self.cols_to_onehot)
+#         encoded_df = pd.DataFrame(encoded, columns=feature_names, index=events.index)
+
+#         other_cols = [c for c in events.columns if c not in self.cols_to_onehot]
+#         events = pd.concat([events[other_cols], encoded_df], axis=1)
+
+#         drop_cols = [c for c in events.columns if c.lower().endswith('other') or c.lower().endswith('none')] + ['source_url']
+#         events = events.drop(columns=[c for c in drop_cols if c in events.columns])
+
+#         return events
+
+#     def _preprocess(self, X: pd.DataFrame, fit_encoder: bool = False) -> pd.DataFrame:
+#         events_features = self._encode_categoricals(X, fit=fit_encoder)
+#         events_features = self._crop_time(events_features)
+
+#         agg_events = aggregate_events(events_features, dt_col='rounded_time')
+#         agg_events['time_to_check'] = agg_events['rounded_time'] - pd.Timedelta(hours=1)
+
+#         return agg_events
+
+#     def fit(self, X: pd.DataFrame, y=None):
+#         agg_events = self._preprocess(X, fit_encoder=True)
+#         self.final_columns_ = list(agg_events.columns)
+#         print('[INFO] Fit done!')
+
+#         return self
+
+#     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+#         agg_events = self._preprocess(X, fit_encoder=False)
+#         agg_events = agg_events.reindex(columns=self.final_columns_, fill_value=0)
+#         print('[INFO] Transform done!')
+
+#         return agg_events
+
+
+# class EventPreprocessingTransformer(BaseEstimator, TransformerMixin):
+#     def __init__(self, datetime_crop_method: str = '1st'):     
+#         self.datetime_crop_method = datetime_crop_method
+#         self.final_columns_ = None
+
+#     def _crop_time(self, X: pd.DataFrame) -> pd.DataFrame:
+#         if self.datetime_crop_method == '1st':
+#             X['date'] = pd.to_datetime(X['date'], utc=True)
+#             X['rounded_time'] = X['date'].apply(lambda x: x.floor('1h'))
+#         elif self.datetime_crop_method == '2nd':
+#             X['date'] = pd.to_datetime(X['date'], utc=True)
+#             X['rounded_time'] = X['date'].apply(lambda x: floor_or_ceil(x, freq='h'))
+        
+#         return X
+
+#     def _preprocess(self, X: pd.DataFrame) -> pd.DataFrame:
+#         events = X.copy()
+#         events_features = extract_news_features_pipeline(events)
+#         events_features = self._crop_time(events_features)
+#         agg_events = aggregate_events(events_features, dt_col='rounded_time')
+#         agg_events['time_to_check'] = agg_events['rounded_time'] - pd.Timedelta(hours=1)
+
+#         return agg_events
+
+#     def fit(self, X: pd.DataFrame, y=None):
+#         agg_events = self._preprocess(X)
+        
+#         self.final_columns_ = list(agg_events.columns)
+#         print('[INFO] Fit done!')
+        
+#         return self
+     
+#     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+#         agg_events = self._preprocess(X)
+        
+#         agg_events = agg_events.reindex(columns=self.final_columns_, fill_value=0)
+#         print('[INFO] Transform done!')
+                
+#         return agg_events
+
+# def classify_source(d: dict, source: str) -> str:
+#     source = str(source).lower()
+#     scores = {k: 0 for k in d.keys()}
+#     for sk, sv in d.items():
+#         overlaps = sum([i in source for i in sv])
+#         scores[sk] = overlaps
+
+#     if max(scores.values()) == 0:
+#         return "OTHER"
+
+#     return max(scores, key=scores.get)
 
 
 class EventPreprocessingTransformer(BaseEstimator, TransformerMixin):

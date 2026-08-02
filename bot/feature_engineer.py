@@ -5,6 +5,7 @@ Calculate features for each economic event and write it into DB
 from typing import Optional
 from datetime import datetime, timedelta, timezone, date as date_type
 import pandas as pd
+import numpy as np
 
 
 def _utc_now() -> datetime:
@@ -22,11 +23,26 @@ def _df_standardize_event_dates(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     out = df.copy()
-    out["date"] = pd.to_datetime(out["date"], utc=True, errors="coerce")
+
+    for dt_col in ("date", "referenceDate"):
+        if dt_col in out.columns:
+            s = pd.to_datetime(out[dt_col], utc=True, errors="coerce")
+            s = s.dt.tz_convert("UTC").dt.tz_localize(None)  # naive UTC
+            out[dt_col] = s.apply(lambda x: None if pd.isna(x) else x.to_pydatetime())
+
+    for int_col in ("id", "importance"):
+        if int_col in out.columns:
+            s = pd.to_numeric(out[int_col], errors="coerce")
+            out[int_col] = s.apply(lambda x: None if pd.isna(x) else int(x))
+
     out = out.dropna(subset=["date"])
-    # make it naive UTC for sqlite DateTime
-    out["date"] = out["date"].dt.tz_convert("UTC").dt.tz_localize(None)
     out["id"] = out["id"].astype(int)
+
+    out.rename(columns={'id': 'event_id'}, inplace=True)
+
+    # out = out.where(pd.notna(out), None)
+    out = out.replace({np.nan: None})
+    
     return out
 
 

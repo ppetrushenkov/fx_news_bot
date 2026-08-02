@@ -3,25 +3,75 @@ import pandas as pd
 import pandas_ta as ta
 
 # from hurst import compute_Hc
-from scipy.stats import entropy
+# from scipy.stats import entropy
+from IPython.display import display
+
+
+def get_trading_session(ticker: str, hour: int, month: int) -> dict:
+    """
+    Determine trading sessions (Europe, USA, Asia) based on ticker, hour, and month,
+    considering daylight saving time (DST).
+    
+    Args:
+        ticker: Currency pair ticker (e.g., 'EURUSD', 'USDJPY')
+        hour: Hour of the day (0-23, UTC)
+        month: Month of the year (1-12)
+    
+    Returns:
+        Dictionary with one-hot encoded sessions: {'europe': 0/1, 'usa': 0/1, 'asia': 0/1}
+    """
+    is_dst = 3 <= month <= 10
+    
+    europe_start = 7 if is_dst else 8
+    europe_end = 16 if is_dst else 17
+    
+    usa_start = 13 if is_dst else 14
+    usa_end = 22 if is_dst else 23
+    
+    asia_start = 0
+    asia_end = 9
+    
+    sessions = {
+        'europe': 1 if europe_start <= hour < europe_end else 0,
+        'usa': 1 if usa_start <= hour < usa_end else 0,
+        'asia': 1 if asia_start <= hour < asia_end else 0
+    }
+    
+    return sessions
 
 
 def get_base_and_quote_currency(pair: str):
     return pair[:-3], pair[-3:]
 
 
-def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
-    direction = data.close.diff(window).abs()
-    sum_range = data.trange.rolling(window).sum()
-    return direction / sum_range
+# def kaufman_efficiency_ratio(data: pd.DataFrame, window: int):
+#     direction = data.close.diff(window).abs()
+#     sum_range = data.trange.rolling(window).sum()
+#     return direction / sum_range
 
 
-def custom_efficiency_ratio(data: pd.DataFrame, window: int = 21) -> float:
+def kaufman_efficiency_ratio(df, window=24):
+    """Рассчитывает Kaufman Efficiency Ratio (ER)
+
+    ER = |Цена(t) - Цена(t-n)| / Сумма(|Цена(i) - Цена(i-1)|)
+    """
+    # Абсолютное изменение цены за весь период (Direction)
+    direction = (df["close"] - df["close"].shift(window)).abs()
+
+    # Сумма абсолютных изменений между соседними барами (Volatility)
+    bar_to_bar_change = (df["close"] - df["close"].shift(1)).abs()
+    volatility = bar_to_bar_change.rolling(window=window).sum()
+
+    # Защита от деления на ноль
+    er = np.where(volatility != 0, direction / volatility, 0)
+    return pd.Series(er, index=df.index)
+
+
+def custom_efficiency_ratio(data: pd.DataFrame, window: int = 21):
     total_range = data.high.rolling(window).max() - data.low.rolling(window).min()
     sum_range = data.trange.rolling(window=window).sum()
     return sum_range / total_range
     # return total_range / sum_range
-
 
 
 def noise_inside_the_bars(data: pd.DataFrame, eps: float = 1e-9):
@@ -36,13 +86,18 @@ def relative_range(bar_range: pd.Series, window: int):
     return (bar_range - v_mean) / (v_std + 1e-9)
 
 
-def relative_atr(atr: pd.Series, window: int):
-    return (atr - atr.rolling(window*5).mean()) / atr.rolling(window*5).std()
+def zscore_atr(atr: pd.Series, window: int):
+    return (atr - atr.rolling(window).mean()) / atr.rolling(window).std()
+
+def fast_vs_slow_atr(hi, lo, cl, fast_period: int = 21, slow_period: int = 100):
+    fast_atr = ta.atr(hi, lo, cl, fast_period)
+    slow_atr = ta.atr(hi, lo, cl, slow_period)
+    return fast_atr / slow_atr
 
 
 def relative_volume(volume: pd.Series, window: int):
-    v_mean = volume.rolling(window*5).mean()
-    v_std = volume.rolling(window*5).std()
+    v_mean = volume.rolling(window).mean()
+    v_std = volume.rolling(window).std()
     return (volume - v_mean) / (v_std + 1e-9)
 
 
@@ -62,26 +117,31 @@ def normalized_bb_width(bb_width, atr):
     return bb_width / atr
 
 
-def add_daily_atr(data: pd.DataFrame, period=14) -> pd.DataFrame:
-    """
-    Добавляет ATR для каждого дня в датафрейме.
-    """
-    data.set_index('time', inplace=True)
-    daily_data = data.resample('D').agg({
-        'open': 'first',
-        'high': 'max',
-        'low': 'min',
-        'close': 'last'
+def create_daily_data(data: pd.DataFrame) -> pd.DataFrame:
+    daily_data = data \
+        .set_index('datetime') \
+        .resample('D').agg(
+        {
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last'
         }
     ).dropna()
+    return daily_data.reset_index()
 
-    data.reset_index(inplace=True)
-    daily_data.reset_index(inplace=True)
 
-    daily_data['daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
-    data = pd.merge(data, daily_data[['time', 'daily_atr']], on='time', how='left')
-    data['daily_atr'] = data['daily_atr'].ffill()
-    return data
+# def add_daily_atr(data: pd.DataFrame, period=14) -> pd.DataFrame:
+#     """
+#     Добавляет ATR для каждого дня в датафрейме.
+#     """
+#     daily_data = create_daily_data(data)
+#     data.reset_index(inplace=True)
+
+#     daily_data['daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
+#     data = pd.merge(data, daily_data[['datetime', 'daily_atr']], on='datetime', how='left')
+#     data['daily_atr'] = data['daily_atr'].ffill()
+#     return data
 
 
 def distance_from_sma_normalized(data: pd.DataFrame, period: int = 240):
@@ -122,165 +182,233 @@ def add_time_features(data: pd.DataFrame, dt_col: str):
     return data
 
 
-def add_features(data: pd.DataFrame, period: int = 21):
-    data['time'] = pd.to_datetime(data['time'], utc=True)
+def generate_smart_lags(df: pd.DataFrame, feature_name: str) -> pd.DataFrame:
+    """
+    Генерирует лаги и статистики, привязанные к торговым сессиям (8ч) и суткам (24ч/48ч).
+    Включает Rolling Min/Max для определения экстремального сжатия.
+    """
+    res_df = df.copy()
+    
+    # 1. Сессионные и суточные лаги
+    lags = [1, 8, 24, 48]
+    for lag in lags:
+        res_df[f'{feature_name}_lag_{lag}'] = res_df[feature_name].shift(lag)
+        
+    # 2. Скользящие средние (4 часа и 8 часов)
+    res_df[f'{feature_name}_roll_mean_4'] = res_df[feature_name].rolling(window=4).mean()
+    res_df[f'{feature_name}_roll_mean_8'] = res_df[feature_name].rolling(window=8).mean()
+    
+    # 3. Rolling Min и Max за суточный цикл (24 бара)
+    res_df[f'{feature_name}_roll_min_24'] = res_df[feature_name].rolling(window=24).min()
+    res_df[f'{feature_name}_roll_max_24'] = res_df[feature_name].rolling(window=24).max()
+    
+    # 4. УМНАЯ ФИЧА: Положение индикатора внутри суточного диапазона (от 0 до 1)
+    # Показывает, насколько близко мы к историческому минимуму флэта за сутки
+    denom = res_df[f'{feature_name}_roll_max_24'] - res_df[f'{feature_name}_roll_min_24']
+    # Защита от деления на ноль, если индикатор был идеально плоским
+    denom = np.where(denom == 0, 1e-6, denom) 
+    
+    res_df[f'{feature_name}_relative_position_24'] = (res_df[feature_name] - res_df[f'{feature_name}_roll_min_24']) / denom
+    
+    # 5. Скорость изменения за одну торговую сессию (8 часов)
+    res_df[f'{feature_name}_diff_8'] = res_df[feature_name] - res_df[f'{feature_name}_lag_8']
+    
+    return res_df
 
-    # atr = ta.atr(h, l, c, period)
+
+def add_features(data: pd.DataFrame, period: int = 21):
+    data['datetime'] = pd.to_datetime(data['datetime'], utc=True)
+
     h, l, c = data["high"], data["low"], data["close"]
-    data = add_daily_atr(data, period)  # Calculate Daily ATR
 
     data["trange"] = ta.true_range(h, l, c)
     data["atr"] = ta.atr(h, l, c, period)
-    atr = data["atr"]
+    data["atr_normalized"] = data["atr"] / data["close"]
+    # atr = data["atr"]
 
-    # 1. Kaufman Efficiency Ratio
+    # Daily data
+    daily_data = create_daily_data(data)
+    
+    # Daily range
+    daily_data['day_range_1'] = (daily_data['high'] - daily_data['low']).shift(1)
+    daily_data['day_range_2'] = (daily_data['high'] - daily_data['low']).shift(2)
+    daily_data['day_range_3'] = (daily_data['high'] - daily_data['low']).shift(3)
+    daily_data['day_range_4'] = (daily_data['high'] - daily_data['low']).shift(4)
+    
+    # Daily pct_change
+    daily_data['day_change_1'] = daily_data['close'].pct_change(1)
+    daily_data['day_change_2'] = daily_data['close'].pct_change(2)
+    daily_data['day_change_3'] = daily_data['close'].pct_change(3)
+    daily_data['day_change_4'] = daily_data['close'].pct_change(4)
+    
+    # Daily ATR
+    daily_data['prev_daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
+
+    # Merge daily data
+    # data = data.merge(daily_data[['datetime', 'prev_day_range', 'prev_daily_atr']], on='datetime', how='left')
+    data = data.merge(daily_data.drop(['open', 'high', 'low', 'close'], axis=1), on='datetime', how='left')
+    
+    # data[['prev_day_range', 'prev_daily_atr']] = data[['prev_day_range', 'prev_daily_atr']].ffill()
+    for c in ['day_range_1', 'day_range_2', 'day_range_3', 'day_range_4', 'day_change_1', 'day_change_2', 'day_change_3', 'day_change_4', 'prev_daily_atr']:
+        data[c] = data[c].ffill()
+
+    # +---------------- Start featuring ---------------+
+    # 1. Efficiency Ratio
     data["kaufman_efficiency_ratio"] = kaufman_efficiency_ratio(data, window=period)
+    data = generate_smart_lags(data, 'kaufman_efficiency_ratio')
 
-    # 2. Custom Range efficiency
     data["custom_efficiency_ratio"] = custom_efficiency_ratio(data, window=period)
 
-    # 3. Wick-to-Body Ratio (Шум внутри баров)
+    # 2. Wick-to-Body Ratio (Шум внутри баров)
     data["wick_ratio"] = noise_inside_the_bars(data)
+    data = generate_smart_lags(data, 'wick_ratio')
 
-    # 4. Relative Range
+    # 3. Relative Range
     data["relative_range"] = relative_range(data["trange"], window=period)
+    data = generate_smart_lags(data, 'relative_range')
 
-    # 5. Relative ATR
-    data["relative_atr"] = relative_atr(atr, window=period)
+    # 4. Relative ATR
+    data["zscore_atr"] = zscore_atr(data["atr"], window=period)
+    data = generate_smart_lags(data, 'zscore_atr')
 
+    # 5. ATR Ratio
+    data["fast_vs_slow_atr"] = fast_vs_slow_atr(data['high'], data['low'], data['close'], fast_period=period, slow_period=100)
+    data = generate_smart_lags(data, 'fast_vs_slow_atr')
+    
     # 6. BB width
     bb_width = calculate_bb_width(data, window=period)
-    data["normalized_bb_width"] = normalized_bb_width(bb_width, atr)
+    data["normalized_bb_width"] = normalized_bb_width(bb_width, data['atr'])
+    data = generate_smart_lags(data, 'normalized_bb_width')
 
     # 7. Distance from SMA
     data["distance_from_sma"] = distance_from_sma_normalized(data, period=240)
+    data = generate_smart_lags(data, 'distance_from_sma')
 
     # 8. ADX (+ DI spread для направленного давления перед новостью)
-    adx_df = ta.adx(h, l, c, length=period)
+    adx_df = ta.adx(data['high'], data['low'], data['close'], length=period)
+    adx_df.columns = ['adx', 'adxr', 'dmp', 'dmn']
     data = pd.concat([data, adx_df], axis=1)
-    dmp_cols = [col for col in adx_df.columns if col.startswith("DMP_")]
-    dmn_cols = [col for col in adx_df.columns if col.startswith("DMN_")]
-    if dmp_cols and dmn_cols:
-        data["di_spread"] = adx_df[dmp_cols[0]] - adx_df[dmn_cols[0]]
+    data['di_spread'] = adx_df['dmp'] - adx_df['dmn']
+    data = generate_smart_lags(data, 'adx')
+    data = generate_smart_lags(data, 'di_spread')
 
     # 9. Текущий бар vs ATR (насколько уже «растянут» рынок)
-    data["tr_over_atr"] = data["trange"] / (atr + 1e-9)
+    data["tr_over_atr"] = data["trange"] / (data["atr"] + 1e-9)
+    data = generate_smart_lags(data, 'tr_over_atr')
 
-    # 10. Реализованная волатильность и всплеск относительно более длинного окна
+    # 10. Realized volatility
     short_w = max(3, period // 3)
     long_w = max(short_w + 1, period * 3)
-    rv_s = realized_volatility(c, short_w)
-    rv_l = realized_volatility(c, long_w)
+    rv_s = realized_volatility(data['close'], short_w)
+    rv_l = realized_volatility(data['close'], long_w)
     data["realized_vol_short"] = rv_s
     data["realized_vol_long"] = rv_l
     data["realized_vol_ratio"] = rv_s / (rv_l + 1e-9)
 
     # 11. Parkinson vol (по high/low) и нормировка на ATR — доп. сигнал до новости
-    pk = parkinson_volatility(h, l, period)
+    pk = parkinson_volatility(data['high'], data['low'], period)
     data["parkinson_vol"] = pk
-    data["parkinson_vol_over_atr"] = pk / (atr + 1e-9)
+    data["parkinson_vol_over_atr"] = pk / (data["atr"] + 1e-9)
 
     # 12. Режим ATR: короткий / длинный (сжатие vs расширение диапазона)
     atr_short_len = max(2, period // 2)
     atr_long_len = max(period + 1, period * 2)
-    atr_short = ta.atr(h, l, c, atr_short_len)
-    atr_long = ta.atr(h, l, c, atr_long_len)
+    atr_short = ta.atr(data['high'], data['low'], data['close'], atr_short_len)
+    atr_long = ta.atr(data['high'], data['low'], data['close'], atr_long_len)
     data["atr_short_over_long"] = atr_short / (atr_long + 1e-9)
+    data = generate_smart_lags(data, 'atr_short_over_long')
 
     # 13. Недавняя «активность» — сумма |log-return| (импульс перед событием)
     data["abs_log_return_sum"] = (
-        np.log(c / c.shift(1)).abs().rolling(short_w).sum()
+        np.log(data['close'] / data['close'].shift(1)).abs().rolling(short_w).sum()
     )
+    data = generate_smart_lags(data, 'abs_log_return_sum')
 
     # 14. Volatility of Volatility (VVoV)
-    data["vvov"] = atr.rolling(period).std() / (atr.rolling(period).mean() + 1e-9)
+    data["vvov"] = data["atr"].rolling(period).std() / (data["atr"].rolling(period).mean() + 1e-9)
+    data = generate_smart_lags(data, 'vvov')
 
     # 15. Add time features
-    data = add_time_features(data, 'time')
+    data = add_time_features(data, 'datetime')
 
     # 16. Log return
     data['log_return'] = np.log(data['close'] / data['close'].shift(1))
 
+    # 17. Sessions
+    session_data = data.apply(lambda row: get_trading_session(row['ticker'], row['hour'], row['month']), axis=1)
+    data['is_europe'] = session_data.apply(lambda x: x['europe'])
+    data['is_usa'] = session_data.apply(lambda x: x['usa'])
+    data['is_asia'] = session_data.apply(lambda x: x['asia'])
+
+    # 18. Sine time features
+    data['sin_hour'] = np.sin(data['hour'] * 2*np.pi/24)
+
     return data
 
-def get_target_range(data: pd.DataFrame, atr: pd.Series, future_n: int = 8) -> pd.Series:
-    """Return range value in future 4 hours"""
-    future_max = data['high'].shift(-future_n).rolling(future_n).max()
-    future_min = data['low'].shift(-future_n).rolling(future_n).min()
-    future_range = future_max - future_min
-    return future_range / atr
+# def get_target_range(data: pd.DataFrame, atr: pd.Series, future_n: int = 8) -> pd.Series:
+#     """Return range value in future 4 hours"""
+#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
+#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
+#     future_range = future_max - future_min
+#     return future_range / atr
 
 
-def stopped_out_by_volatility_category(data, future_n: int = 8):  # 8 is 4 hours (8 bars in M30 timeframe)
-    """Return the category of volatility.
-    There is 5 levels of volatility:
-    0 - no 24 bar min/max values was broke out simultaniously
-    Returns a Series with values 0-4 indicating volatility category.
-    """
-    ranges = [24, 48, 96, 144]  # 'half_day', '1_day', '2_day', '3_day'
-    
-    future_max = data['high'].shift(-future_n).rolling(future_n).max()
-    future_min = data['low'].shift(-future_n).rolling(future_n).min()
-
-    # Initialize result Series with zeros
-    result = pd.Series(0, index=data.index)
-    
-    levels = {
-        24: 1,
-        48: 2,
-        96: 3,
-        144: 4
-    }
-
-    # Check each range level, starting from smallest to largest
-    # The largest matching range will overwrite previous values
-    for v in ranges:
-        prev_max_high = data['high'].rolling(v).max()
-        prev_min_low = data['low'].rolling(v).min()
-        
-        # Create boolean mask for rows where condition is True
-        condition = (future_max > prev_max_high) & (future_min < prev_min_low)
-        
-        # Update result for rows where condition is True
-        result.loc[condition] = levels[v]
-    
-    return result
-
-
-def atr_volatility_expansion(data, atr, stop_mult, future_n: int = 8):
-    current_close = data['close']
-    future_max = data['high'].shift(-future_n).rolling(future_n).max()
-    future_min = data['low'].shift(-future_n).rolling(future_n).min()
-    future_range = future_max - future_min
-
-    # Find stop levels
-    upper_stop = current_close + (atr * stop_mult)
-    lower_stop = current_close - (atr * stop_mult)
-
-    # Targets
-    target_volatility_expantion = future_range > (atr * 3)
-    target_whipsaw = (future_max > upper_stop) & (future_min < lower_stop)
-    target_chaos = target_volatility_expantion | target_whipsaw
-    return target_chaos.astype(int)
-
-
-# def label_future_chaos(data: pd.DataFrame, N=5, stop_mult=1.5):
+# def stopped_out_by_volatility_category(data, future_n: int = 8):  # 8 is 4 hours (8 bars in M30 timeframe)
+#     """Return the category of volatility.
+#     There is 5 levels of volatility:
+#     0 - no 24 bar min/max values was broke out simultaniously
+#     Returns a Series with values 0-4 indicating volatility category.
 #     """
-#     Генерирует сигналы о будущем хаосе на N баров вперед.
-#     stop_mult: множитель ATR для определения "выноса стопов"
-#     """
-#     atr = ta.ATR(data['high'], data['low'], data['close'], N*3)
-
-#     # Classify big volatility in future (if future range in 4 hours will be greater ATR, then return 1)
-#     data['target_is_volatile'] = is_volatile_in_future(data, atr, future_n=N)
-
-#     # Classify volatility category
-#     data['target_volatility_category'] = stopped_out_by_volatility_category(data, future_n=N)
+#     ranges = [24, 48, 96, 144]  # 'half_day', '1_day', '2_day', '3_day'
     
-#     # Target range in 4 hours
-#     data[f'target_range_normalized'] = get_target_range(data, atr, future_n=N)
+#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
+#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
 
-#     # Target Bool if 
-#     data['target_chaos'] = atr_volatility_expansion(data, atr, stop_mult, future_n=N)
+#     # Initialize result Series with zeros
+#     result = pd.Series(0, index=data.index)
+    
+#     levels = {
+#         24: 1,
+#         48: 2,
+#         96: 3,
+#         144: 4
+#     }
 
-#     return data
+#     # Check each range level, starting from smallest to largest
+#     # The largest matching range will overwrite previous values
+#     for v in ranges:
+#         prev_max_high = data['high'].rolling(v).max()
+#         prev_min_low = data['low'].rolling(v).min()
+        
+#         # Create boolean mask for rows where condition is True
+#         condition = (future_max > prev_max_high) & (future_min < prev_min_low)
+        
+#         # Update result for rows where condition is True
+#         result.loc[condition] = levels[v]
+    
+#     return result
+
+
+# def extremum_breakout(data: pd.DataFrame, channel_period: int, future_n: int) -> pd.Series:
+#     """Return boolean series if extremum breakout happened in future n hours"""
+#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
+#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
+#     return (future_max > data['close']) & (future_min < data['close'])
+
+
+# def atr_volatility_expansion(data, atr, stop_mult, future_n: int = 8):
+#     current_close = data['close']
+#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
+#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
+#     future_range = future_max - future_min
+
+#     # Find stop levels
+#     upper_stop = current_close + (atr * stop_mult)
+#     lower_stop = current_close - (atr * stop_mult)
+
+#     # Targets
+#     target_volatility_expantion = future_range > (atr * 3)
+#     target_whipsaw = (future_max > upper_stop) & (future_min < lower_stop)
+#     target_chaos = target_volatility_expantion | target_whipsaw
+#     return target_chaos.astype(int)
+

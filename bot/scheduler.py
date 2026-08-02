@@ -4,21 +4,23 @@ from datetime import timezone, timedelta
 import datetime
 from typing import Optional
 
-# from numba.core import event
-# from numpy import delete
-from requests import Session
+# from requests import Session
 
 from bot.data_loader import get_economic_events
 from db.data_handler import DBHandler
 
-try:
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    from apscheduler.triggers.date import DateTrigger
-except Exception:  # pragma: no cover
-    AsyncIOScheduler = None  # type: ignore
-    CronTrigger = None  # type: ignore
-    DateTrigger = None  # type: ignore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
+
+# try:
+#     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+#     from apscheduler.triggers.cron import CronTrigger
+#     from apscheduler.triggers.date import DateTrigger
+# except Exception:  # pragma: no cover
+#     AsyncIOScheduler = None  # type: ignore
+#     CronTrigger = None  # type: ignore
+#     DateTrigger = None  # type: ignore
 
 import pandas as pd
 from sqlalchemy import text, select, delete
@@ -44,28 +46,74 @@ async def run_ml_prediction_for_upcoming_events() -> None:
     return
 
 
-def _get_tomorrow_event_times_minus_1h() -> list[datetime.datetime]:
-    tomorrow = (_utc_now() + timedelta(days=1)).date()
-    next_day = tomorrow + timedelta(days=1)
+def _get_next_event_times_minus_1h() -> list[datetime.datetime]:
+    """Return one-hour-before event times that are still in the future.
+
+    The window starts at the current UTC moment and ends at the end of the
+    next calendar day, so the scheduler only prepares jobs for upcoming events.
+    """
+    now_utc = _utc_now().replace(tzinfo=None)
+    window_end = datetime.datetime.combine(
+        (now_utc.date() + timedelta(days=1)),
+        datetime.time(23, 59, 59, 999999),
+    )
+
     with SessionLocal() as sess:
         q = sess.query(Events.date).filter(
-            Events.date >= datetime.datetime.combine(tomorrow, datetime.time.min),
-            Events.date < datetime.datetime.combine(next_day, datetime.time.min)
+            Events.date >= now_utc,
+            Events.date < window_end,
         )
         events = pd.read_sql(q.statement, sess.bind)
-    
+
     if events.empty:
         return []
 
     events['date'] = pd.to_datetime(events['date'], errors='coerce')
-    events.dropna(subset=['date'], inplace=True)
+    events = events.dropna(subset=['date'])
 
-    rounded_date = events['date'].dt.floor('1h').unique()
+    rounded_date = (
+        events['date']
+        .dt.floor('1h')
+        .sort_values()
+        .drop_duplicates()
+    )
 
-    return [
-        (dt.to_pydatetime() if hasattr(dt, "to_pydatetime") else dt) - timedelta(hours=1)
-        for dt in rounded_date
-    ]
+    scheduled_times = []
+    for dt in rounded_date:
+        candidate = (dt.to_pydatetime() if hasattr(dt, 'to_pydatetime') else dt) - timedelta(hours=1)
+        if candidate >= now_utc:
+            scheduled_times.append(candidate)
+
+    return scheduled_times
+
+
+# def _get_tomorrow_event_times_minus_1h() -> list[datetime.datetime]:
+#     """Backward-compatible wrapper used by the app."""
+#     return _get_next_event_times_minus_1h()
+
+
+# def _get_next_event_times_minus_1h() -> list[datetime.datetime]:
+#     tomorrow = (_utc_now() + timedelta(days=1)).date()
+#     next_day = tomorrow + timedelta(days=1)
+#     with SessionLocal() as sess:
+#         q = sess.query(Events.date).filter(
+#             Events.date >= datetime.datetime.combine(tomorrow, datetime.time.min),
+#             Events.date < datetime.datetime.combine(next_day, datetime.time.min)
+#         )
+#         events = pd.read_sql(q.statement, sess.bind)
+    
+#     if events.empty:
+#         return []
+
+#     events['date'] = pd.to_datetime(events['date'], errors='coerce')
+#     events.dropna(subset=['date'], inplace=True)
+
+#     rounded_date = events['date'].dt.floor('1h').unique()
+
+#     return [
+#         (dt.to_pydatetime() if hasattr(dt, "to_pydatetime") else dt) - timedelta(hours=1)
+#         for dt in rounded_date
+#     ]
 
 
 def _reschedule_tomorrow_ml_jobs(scheduler: AsyncIOScheduler) -> None:
@@ -82,7 +130,7 @@ def _reschedule_tomorrow_ml_jobs(scheduler: AsyncIOScheduler) -> None:
         if job.id.startswith("ml_before_event_"):
             scheduler.remove_job(job.id)
 
-    for t in _get_tomorrow_event_times_minus_1h():
+    for t in _get_next_event_times_minus_1h():
         scheduler.add_job(
             run_ml_prediction_for_upcoming_events,
             DateTrigger(run_date=t),
@@ -111,14 +159,14 @@ def set_schedulers() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Daily: by config (UTC)
-    scheduler.add_job(
-        daily_scheduler_job,
-        CronTrigger(hour=Config.NEWS_UPDATE_HOUR, minute=Config.NEWS_UPDATE_MINUTE, timezone=timezone.utc),
-        id="daily_update_tomorrow_events",
-        kwargs={"scheduler": scheduler},
-        replace_existing=True,
-    )
+    # # Daily: by config (UTC)
+    # scheduler.add_job(
+    #     daily_scheduler_job,
+    #     CronTrigger(hour=Config.NEWS_UPDATE_HOUR, minute=Config.NEWS_UPDATE_MINUTE, timezone=timezone.utc),
+    #     id="daily_update_tomorrow_events",
+    #     kwargs={"scheduler": scheduler},
+    #     replace_existing=True,
+    # )
 
     # Convenience: also schedule tomorrow's one-off jobs immediately on startup.
     # The daily job will re-create these each day.
@@ -142,12 +190,7 @@ def weekly_scheduler_job(
     - Update Prices
     - Populate EventRanges for the week
     """
-    update_block(
-        countries=countries,
-        tickers=tickers,
-        prices_interval=prices_interval,
-        prices_outputsize=prices_outputsize,
-    )
+    update_block()
     return
 
 
