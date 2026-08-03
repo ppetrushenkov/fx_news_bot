@@ -71,6 +71,24 @@ class DBHandler:
             )
         events = pd.read_sql(stmt, self.sess.bind)
         return events
+
+    def get_events_for_next_hour(self) -> pd.DataFrame:
+        now = _utc_now()
+        start = now + timedelta(hours=1)
+        end = now + timedelta(hours=2)
+
+        # stmt = select(Events).where(
+        #     Events.date >= start.strftime('%Y-%m-%d %H:%M:%S'),
+        #     Events.date < end.strftime('%Y-%m-%d %H:%M:%S')
+        # )
+
+        stmt = select(Events).where(
+            Events.date >= start,
+            Events.date < end
+        )
+        
+        events = pd.read_sql(stmt, self.sess.bind)
+        return events
     
     def get_last_prices(self, period: int):
         is_weekday = extract('dow', Prices.datetime).notin_([0, 6])
