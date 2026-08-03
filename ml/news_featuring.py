@@ -198,9 +198,13 @@ def aggregate_events(df: pd.DataFrame, dt_col: str = 'time_to_check'):
     df['weights'] = df['most_important_event'].apply(lambda x: EVENT_WEIGHTS_D.get(x, 0))
     main_event = df.groupby('rounded_time')[['weights', 'most_important_event']].apply(lambda x: get_max_weight_event(x))
     main_event.name = 'main_event'
+    main_event = main_event.replace('No main events', 0.0)
     main_event.fillna('No main events', inplace=True)
 
-    agg = agg.join(main_event, how='left')
+    if main_event.empty:
+        agg['main_event'] = 'No main events'
+    else:
+        agg = agg.join(main_event, how='left')
 
     # 3. Add previous and next hour features
     agg['prev_hour_news_count'] = agg['news_count'].shift(1)
