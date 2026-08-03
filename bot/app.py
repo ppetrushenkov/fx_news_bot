@@ -382,16 +382,16 @@ async def save_timezone(
     offset: float
 ) -> UserSettings:
     """
-    Сохраняет (или создаёт) часовой пояс пользователя в UserSettings.
+    Saves (or creates) the user's time zone in UserSettings table in the database.
 
-    :param user_id: Telegram user_id (PK таблицы)
-    :param offset: смещение часового пояса, например 3.0 для UTC+3
-    :return: обновлённый/созданный объект UserSettings
+    :param user_id: Telegram user_id (rk)
+    :param offset: offset from UTC in hours (float, can be negative)
+    :return: updated UserSettings object
     """
     settings = db.get(UserSettings, user_id)
 
     if settings is None:
-        # пользователя ещё нет в таблице — создаём с дефолтными quiet hours
+        # user does not exist in the database, create a new record
         settings = UserSettings(
             user_id=user_id,
             user_timezone=offset
@@ -419,7 +419,7 @@ async def toggle_importance(callback_query: types.CallbackQuery):
     
     if not settings:
         # На случай, если настроек почему-то не оказалось в БД
-        await callback_query.answer("Настройки не найдены.")
+        await callback_query.answer("Something went wrong while getting user settings.")
         return
 
     # 2. Меняем значение динамически по имени атрибута
@@ -432,7 +432,7 @@ async def toggle_importance(callback_query: types.CallbackQuery):
     
     except Exception as e:
         db.rollback()  # Если что-то пошло не так, откатываем изменения
-        await callback_query.answer("Ошибка при сохранении настроек.")
+        await callback_query.answer("Something went wrong while saving settings.")
         return
 
     # 4. Обновляем клавиатуру в интерфейсе Telegram
@@ -451,7 +451,7 @@ async def toggle_notification(callback_query: types.CallbackQuery):
     
     if not settings:
         # На случай, если настроек почему-то не оказалось в БД
-        await callback_query.answer("Настройки не найдены.")
+        await callback_query.answer("Something went wrong while getting user settings.")
         return
 
     # 2. Меняем значение динамически по имени атрибута
@@ -464,7 +464,7 @@ async def toggle_notification(callback_query: types.CallbackQuery):
     
     except Exception as e:
         db.rollback()  # Если что-то пошло не так, откатываем изменения
-        await callback_query.answer("Ошибка при сохранении настроек.")
+        await callback_query.answer("Something went wrong while saving settings.")
         return
 
     # 4. Обновляем клавиатуру в интерфейсе Telegram
@@ -483,11 +483,11 @@ def get_alert_settings_keyboard(settings: UserSettings):
     vol_status = "🟢" if settings.chaos_alerts else "🔴"
     
     builder.row(
-        types.InlineKeyboardButton(text=f"{daily_status} Ежедневные", callback_data="toggle_daily_alerts"),
-        types.InlineKeyboardButton(text=f"{weekly_status} Еженедельные", callback_data="toggle_weekly_alerts")
+        types.InlineKeyboardButton(text=f"{daily_status} Daily", callback_data="toggle_daily_alerts"),
+        types.InlineKeyboardButton(text=f"{weekly_status} Weekly", callback_data="toggle_weekly_alerts")
     )
     builder.row(
-        types.InlineKeyboardButton(text=f"{vol_status} Волатильность", callback_data="toggle_chaos_alerts")
+        types.InlineKeyboardButton(text=f"{vol_status} Volatility", callback_data="toggle_chaos_alerts")
     )
 
     return builder.as_markup()
@@ -522,7 +522,7 @@ async def set_importance(message: types.Message, state: FSMContext):
         db.commit()
     
     await message.answer(
-        text="⚙️ Настройки важности событий:",
+        text="⚙️ Settings for importance level:",
         reply_markup=get_importance_settings_keyboard(settings) # Передаем объект напрямую
     )
 
@@ -537,7 +537,7 @@ async def set_alerts(message: types.Message, state: FSMContext):
         db.commit()
     
     await message.answer(
-        text="⚙️ Настройки уведомлений:",
+        text="⚙️ Settings for notifications:",
         reply_markup=get_alert_settings_keyboard(settings) # Передаем объект напрямую
     )
 
