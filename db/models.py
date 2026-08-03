@@ -144,6 +144,9 @@ class UserSettings(Base):
     show_medium_importance = Column(Boolean, default=False)
     show_high_importance = Column(Boolean, default=True)
 
+    # --- ML risk settings ---
+    ml_risk_level = Column(String, default="conservative")  # can be "conservative", "medium", or "aggressive"
+
     updated_at = Column(DateTime, default=func.now())
 
 
