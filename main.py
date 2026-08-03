@@ -29,10 +29,10 @@ async def main():
     print("\n[INFO] Update block completed")
 
     # Block 3: Setup schedulers
-    set_schedulers()
-    print("\n[INFO] Schedulers started")
+    # set_schedulers()
+    # print("\n[INFO] Schedulers started")
 
-    # Block 4: Start bot
+    # Block 3: Start bot
     await start_bot()
     print("\n[INFO] Bot started")
 
