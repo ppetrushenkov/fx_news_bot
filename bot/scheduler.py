@@ -62,6 +62,7 @@ def _get_next_event_times_minus_1h() -> list[datetime.datetime]:
         q = sess.query(Events.date).filter(
             Events.date >= now_utc,
             Events.date < window_end,
+            Events.importance >= 0  # Consider events with medium and high importance
         )
         events = pd.read_sql(q.statement, sess.bind)
 
@@ -85,35 +86,6 @@ def _get_next_event_times_minus_1h() -> list[datetime.datetime]:
             scheduled_times.append(candidate)
 
     return scheduled_times
-
-
-# def _get_tomorrow_event_times_minus_1h() -> list[datetime.datetime]:
-#     """Backward-compatible wrapper used by the app."""
-#     return _get_next_event_times_minus_1h()
-
-
-# def _get_next_event_times_minus_1h() -> list[datetime.datetime]:
-#     tomorrow = (_utc_now() + timedelta(days=1)).date()
-#     next_day = tomorrow + timedelta(days=1)
-#     with SessionLocal() as sess:
-#         q = sess.query(Events.date).filter(
-#             Events.date >= datetime.datetime.combine(tomorrow, datetime.time.min),
-#             Events.date < datetime.datetime.combine(next_day, datetime.time.min)
-#         )
-#         events = pd.read_sql(q.statement, sess.bind)
-    
-#     if events.empty:
-#         return []
-
-#     events['date'] = pd.to_datetime(events['date'], errors='coerce')
-#     events.dropna(subset=['date'], inplace=True)
-
-#     rounded_date = events['date'].dt.floor('1h').unique()
-
-#     return [
-#         (dt.to_pydatetime() if hasattr(dt, "to_pydatetime") else dt) - timedelta(hours=1)
-#         for dt in rounded_date
-#     ]
 
 
 def _reschedule_tomorrow_ml_jobs(scheduler: AsyncIOScheduler) -> None:
@@ -156,7 +128,7 @@ def set_schedulers() -> AsyncIOScheduler:
         weekly_scheduler_job,
         CronTrigger(day_of_week="sun", hour=18, minute=0, timezone=timezone.utc),
         id="weekly_update_sun_1800_utc",
-        replace_existing=True,
+        replace_existing=False,
     )
 
     # # Daily: by config (UTC)
@@ -176,13 +148,7 @@ def set_schedulers() -> AsyncIOScheduler:
     return scheduler
 
 
-def weekly_scheduler_job(
-    *,
-    countries: Optional[list[str]] = None,
-    tickers: Optional[list[str]] = None,
-    prices_interval: str = "1h",
-    prices_outputsize: int = 1200,
-) -> None:
+def weekly_scheduler_job() -> None:
     """
     Weekly (Sunday 18:00 UTC):
     - Refresh FutureEvents for next week
