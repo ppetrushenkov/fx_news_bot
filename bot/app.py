@@ -60,7 +60,7 @@ import pandas as pd
 
 
 # +=====================================+
-# |            LOGGING                  |
+# |       INITIALIZE VARIABLES          |
 # +=====================================+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -82,6 +82,14 @@ bot = Bot(token=Config.TELEGRAM_TOKEN)
 
 # Initialize the scheduler
 scheduler = AsyncIOScheduler(timezone=timezone.utc)
+
+ml_thresholds = {
+    'SFP': {'conservative': 0.8747533895, 'medium': 0.7818015112, 'aggressive': 0.629072507},
+    'Extremum Breakout': {'conservative': 0.8475851617, 'medium': 0.8032437163, 'aggressive': 0.5837278663},
+    'Big Spike': {'conservative': 0.653579109, 'medium': 0.5044043359, 'aggressive': 0.3903734542},
+    'Chaos 3h': {'conservative': 0.7572498323, 'medium': 0.6307368361, 'aggressive': 0.4979755551},
+    'Chaos 24h': {'conservative': 0.8111326382, 'medium': 0.6975647725, 'aggressive': 0.4828139359},
+}
 
 
 # Timezone options
@@ -111,12 +119,21 @@ def build_main_buttons() -> ReplyKeyboardMarkup:
         KeyboardButton(text="📅 Events for today"),
         KeyboardButton(text="📅 Events for tomorrow"),
     )
-    builder.row(KeyboardButton(text="📊 Events for the week"))
-    builder.row(KeyboardButton(text="🧠 Make a forecast for the current moment"))
+    builder.row(
+            KeyboardButton(text="📊 Events for the week"),
+            KeyboardButton(text="🧠 Make a forecast for the current moment"),
+        )
 
-    builder.row(KeyboardButton(text="🔔 Notification settings"))
-    builder.row(KeyboardButton(text="📍 Timezone settings"))
-    builder.row(KeyboardButton(text="⚙️ Importance settings"))
+    builder.row(
+        KeyboardButton(text="🔔 Notification settings"),
+        KeyboardButton(text="📍 Timezone settings"),
+    )
+
+    builder.row(
+            KeyboardButton(text="⚙️ Importance settings"),
+            KeyboardButton(text="⚙️ Adjust ML risk settings"),
+        )
+
     builder.row(KeyboardButton(text="❓ Help"))
 
     return builder.as_markup(resize_keyboard=True)
@@ -542,6 +559,7 @@ async def set_alerts(message: types.Message, state: FSMContext):
     )
 
 
+
 # +=====================================+
 # |               HELP                  |
 # +=====================================+
@@ -837,14 +855,19 @@ async def test_check_the_market(message: types.Message):
     predictor = FxRangePredictor()
     
     # Preparing Events
-    now = _utc_now()
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     events = db.get_events_for_range(
-        start=now - timedelta(days=2), 
-        end=now + timedelta(days=2)
-    )
+            start=now - timedelta(days=2), 
+            end=now + timedelta(days=2)
+        )
+    print(events[['date', 'title']].head())
     events['rounded_time'] = events['date'].apply(lambda x: x.floor('1h'))
     agg_events = predictor.event_transformer.transform(events)
-    agg_events = agg_events.iloc[[-2], :]
+
+    td = now + timedelta(hours=1)
+
+    agg_events = agg_events[agg_events['rounded_time'] >= td]
+    agg_events = agg_events.iloc[[0], :]
 
     print('[CHECK THE MARKET] Aggregated events for the next hour')
 
@@ -886,62 +909,78 @@ def get_user_ids_for_chaos_predictions() -> list:
         db.close()
 
 
-async def scheduled_check_the_market() -> None:
-    """Run the market check without a Telegram `message` (for scheduled jobs).
-
-    This performs the same ML/prediction steps but logs results instead of
-    replying to a user. Scheduled jobs should use this entrypoint.
-    """
-    try:
-        print('[SCHEDULED CHECK THE MARKET] Start scheduled market check')
-        db = DBHandler()
-        predictor = FxRangePredictor()
-
-        # Preparing Events
-        events = db.get_events_for_next_hour()
-        events['rounded_time'] = events['date'].apply(lambda x: x.floor('1h'))
-        agg_events = predictor.event_transformer.transform(events)
-        agg_events = agg_events.iloc[[-2], :]
-
-        # Prices
-        prices = db.get_last_prices(period=21*24+1)
-        agg_prices = predictor.price_transformer.transform(prices)
-        agg_prices_latest = agg_prices.groupby('ticker').tail(1)
-
-        # Unite all together
-        db.update_prices()
-        df = agg_prices_latest.merge(agg_events, how='cross')
-        df = db.add_ranges_for_each_event(df)
-        FEATURES = [i for i in df.columns if i not in ['time', 'time_to_check', 'rounded_time', 'datetime', 'open', 'high', 'low', 'close']]
-        df = df[FEATURES]
-
-        # Predictions
-        print('[CHECK THE MARKET] Add predictions to DataFrame for further processing')
-        predictions = predictor.get_predictions(df)
-        print('[CHECK THE MARKET] Predictions for the next hour')
-        print(predictions)
-
-        # Users subscribed on ML predictions
-        users_to_alert = get_user_ids_for_chaos_predictions()
-
-        # Get events
-        if len(users_to_alert) > 0 and predictions is not None:
-            text = formulate_prediction_message(events, agg_events, predictions)
+async def scheduled_check_the_market():
+    print('[CHECK THE MARKET] Start the function to checking the market')
+    db = DBHandler()
+    predictor = FxRangePredictor()
     
-            for user_id in users_to_alert:
-                try:
-                    await bot.send_message(
-                        chat_id=user_id, 
-                        text=text, 
-                        parse_mode="HTML", 
-                        disable_web_page_preview=True
-                    )
-                    await asyncio.sleep(0.1)
-                except Exception as e:
-                    logging.error(f"Can't send message to user {user_id}: {e}")
+    print('[CHECK THE MARKET] Start the function to checking the market')
+    
+    # Preparing Events
+    # TODO: Do more precise filtering of events to only those that are relevant for the next hour
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    events = db.get_events_for_range(
+            start=now - timedelta(days=2), 
+            end=now + timedelta(days=2)
+        )
+    print(events[['date', 'title']].head())
+    events['rounded_time'] = events['date'].apply(lambda x: x.floor('1h'))
+    agg_events = predictor.event_transformer.transform(events)
 
-    except Exception as e:
-        logging.exception('Error in scheduled_check_the_market: %s', e)
+    td = now + timedelta(hours=1)
+
+    agg_events = agg_events[agg_events['rounded_time'] >= td]
+    agg_events = agg_events.iloc[[0], :]
+
+    print('[CHECK THE MARKET] Aggregated events for the next hour')
+
+    # Prices
+    prices = db.get_last_prices(period=21*24+1)  # 21 days + 1 hour for ATR calculation
+    agg_prices = predictor.price_transformer.transform(prices)
+    agg_prices_latest = agg_prices.groupby('ticker').tail(1)
+
+    # Unite all together
+    df = agg_prices_latest.merge(agg_events, how='cross')
+
+    # Add range features for each event
+    df = db.add_ranges_for_each_event(df)
+
+    FEATURES = [i for i in df.columns if i not in ['time', 'time_to_check', 'rounded_time', 'datetime', 'open', 'high', 'low', 'close']]
+    df = df[FEATURES]
+
+    # PREDICTIONS
+    print('[CHECK THE MARKET] Add predictions to DataFrame for further processing')
+    predictions = predictor.get_predictions(df)
+    print('[CHECK THE MARKET] Predictions for the next hour')
+    print(predictions)
+
+    # Users subscribed on ML predictions
+    users_to_alert = get_user_ids_for_chaos_predictions()
+
+    # Get events
+    if len(users_to_alert) > 0 and predictions is not None:
+        important_news = events[(events['importance'] == 1) & (events['rounded_time'] == agg_events['rounded_time'].iloc[0])]
+        news_list = important_news['title'].unique().tolist()
+        news_str = "\n ▫️ ".join(news_list) if news_list else "no important events in the next hour"
+        text = formulate_prediction_message(events, agg_events, predictions)
+
+        for user_id in users_to_alert:
+            try:
+                await bot.send_message("⚠️ <b>Market Prediction Update</b>\n\n"
+                    "In the next hour, the following important news are expected:\n"
+                    f"*{news_str}*\n\n"
+                    "Please check the details below for potential market movements and noise detection.",
+                    parse_mode=ParseMode.HTML)
+                
+                await bot.send_message(
+                    chat_id=user_id, 
+                    text=text, 
+                    parse_mode="HTML", 
+                    disable_web_page_preview=True
+                )
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logging.error(f"Can't send message to user {user_id}: {e}")
 
 
 def escape_markdown_v2(s: str) -> str:
@@ -1257,13 +1296,13 @@ async def main():
     )
 
     # Every day at 23:59 UTC runs a function to set schedulers on next day for users who subscribed on chaos alerts (ML)
-    scheduler.add_job(
-        daily_summary_dispatcher,
-        trigger=CronTrigger(hour=23, minute=59, timezone=timezone(timedelta(hours=0))),
-        id="daily_summary_dispatcher",
-        replace_existing=True,
-    )
-    await daily_summary_dispatcher() # Run once at startup to ensure the next day's jobs are scheduled
+    # scheduler.add_job(
+    #     daily_summary_dispatcher,
+    #     trigger=CronTrigger(hour=23, minute=59, timezone=timezone(timedelta(hours=0))),
+    #     id="daily_summary_dispatcher",
+    #     replace_existing=True,
+    # )
+    # await daily_summary_dispatcher() # Run once at startup to ensure the next day's jobs are scheduled
     
     scheduler.start()
 
