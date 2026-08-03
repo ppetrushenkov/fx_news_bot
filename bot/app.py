@@ -11,7 +11,7 @@ from ml.news_featuring import extract_news_features_pipeline, aggregate_events, 
 from ml.price_featuring import add_features, get_base_and_quote_currency
 
 from bot.feature_engineer import _utc_now, _next_sunday_utc
-from bot.scheduler import _get_next_event_times_minus_1h
+from bot.scheduler import _get_next_event_times_minus_1h, weekly_scheduler_job
 
 from sqlalchemy import (
     func, 
@@ -74,6 +74,7 @@ db = next(get_db())
 
 
 router = Router()
+
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(router)
 
@@ -83,14 +84,15 @@ bot = Bot(token=Config.TELEGRAM_TOKEN)
 scheduler = AsyncIOScheduler(timezone=timezone.utc)
 
 
+# Timezone options
 TZ_OPTIONS = [
-    ("Лондон (UTC+0)", 0),
-    ("Франкфурт/Париж (UTC+1)", 1),
-    ("Италия (UTC+2)", 2),
-    ("Москва/Стамбул (UTC+3)", 3),
-    ("Нью-Йорк (UTC-5)", -5),
-    ("Чикаго (UTC-6)", -6),
-    ("Сингапур/Гонконг (UTC+8)", 8),
+    ("London (UTC+0)", 0),
+    ("Frankfurt/Paris (UTC+1)", 1),
+    ("Italy (UTC+2)", 2),
+    ("Moscow/Istanbul (UTC+3)", 3),
+    ("New York (UTC-5)", -5),
+    ("Chicago (UTC-6)", -6),
+    ("Singapore/Hong Kong (UTC+8)", 8),
 ]
 
 
@@ -99,68 +101,78 @@ class OnboardingStates(StatesGroup):
     waiting_for_alert_preferences = State()
 
 
-def build_buttons() -> ReplyKeyboardMarkup:
+# +=====================================+
+#                START                  |
+# +=====================================+
+
+def build_main_buttons() -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
     builder.row(
-        KeyboardButton(text="📅 События на сегодня"),
-        KeyboardButton(text="📅 События на завтра"),
+        KeyboardButton(text="📅 Events for today"),
+        KeyboardButton(text="📅 Events for tomorrow"),
     )
-    builder.row(KeyboardButton(text="📊 События на неделю"))
-    builder.row(KeyboardButton(text="🧠 Сделать прогноз на текущий момент"))
-    
-    builder.row(KeyboardButton(text="🔔 Настройки уведомлений"))
-    builder.row(KeyboardButton(text="📍 Настройки часового пояса"))
-    builder.row(KeyboardButton(text="⚙️ Настройка важности событий"))
-    builder.row(KeyboardButton(text="❓ Помощь"))
+    builder.row(KeyboardButton(text="📊 Events for the week"))
+    builder.row(KeyboardButton(text="🧠 Make a forecast for the current moment"))
+
+    builder.row(KeyboardButton(text="🔔 Notification settings"))
+    builder.row(KeyboardButton(text="📍 Timezone settings"))
+    builder.row(KeyboardButton(text="⚙️ Importance settings"))
+    builder.row(KeyboardButton(text="❓ Help"))
 
     return builder.as_markup(resize_keyboard=True)
 
 
-# +=====================================+
-#           SUMMARY BUTTONS             |
-# +=====================================+
-@dp.message(F.text == "📅 События на сегодня")
+@dp.message(F.text == "📅 Events for today")
 async def btn_today_summary(message: types.Message):
     await today_summary(message)
 
-@dp.message(F.text == "📅 События на завтра")
+@dp.message(F.text == "📅 Events for tomorrow")
 async def btn_tomorrow_summary(message: types.Message):
     await tomorrow_summary(message)
 
-@dp.message(F.text == "📊 События на неделю")
+@dp.message(F.text == "📊 Events for the week")
 async def btn_weekly_summary(message: types.Message):
     await weekly_summary(message)
 
-@dp.message(F.text == "🧠 Сделать прогноз на текущий момент")
+@dp.message(F.text == "🧠 Make a forecast for the current moment")
 async def btn_forecast(message: types.Message):
     await test_check_the_market(message)
 
-@dp.message(F.text == "⚙️ Настройка важности событий")
+@dp.message(F.text == "⚙️ Importance settings")
 async def btn_importance(message: types.Message, state: FSMContext):
     await set_importance(message, state)
 
-@dp.message(F.text == "🔔 Настройки уведомлений")
+@dp.message(F.text == "🔔 Notification settings")
 async def btn_alerts(message: types.Message, state: FSMContext):
     await set_alerts(message, state)
 
-@dp.message(F.text == "📍 Настройки часового пояса")
+@dp.message(F.text == "📍 Timezone settings")
 async def btn_timezone(message: types.Message, state: FSMContext):
     await set_gmt(message, state)
     
-@dp.message(F.text == "❓ Помощь")
+@dp.message(F.text == "❓ Help")
 async def btn_help(message: types.Message):
     await help_(message)
 
 
+@dp.message(CommandStart())
+async def start(message: types.Message, state: FSMContext):
+    intro_text = """
+👋 Hi! I’m a Forex volatility tracking bot.
+I monitor major USD pairs and signal potential market turbulence an hour before key macroeconomic events (NFP, interest rate decisions, etc.).
+To send you alerts at the correct local time, please specify your time zone using the command /set_gmt"""
+    await message.answer(intro_text, reply_markup=build_main_buttons())
+
+
 # +=====================================+
-#      SET ALERT TIME AND SCHEDULER     |
+#     SET DAILY ALERTS AND SCHEDULER    |
 # +=====================================+
-def get_user_ids_for_daily_alert(target_offset: int) -> list:
-    """Return the list of user ids, that should get daily alerts at specific time"""
+def get_user_ids_for_daily_alert(gmt: int) -> list:
+    """Return the list of user ids, that subscribed on daily alerts"""
     db = SessionLocal()
     try:        
         stmt = select(UserSettings.user_id).where(
-            cast(func.floor(UserSettings.user_timezone), Integer) == target_offset,
+            cast(func.floor(UserSettings.user_timezone), Integer) == gmt,
             UserSettings.daily_alerts == True
         )
         
@@ -172,6 +184,9 @@ def get_user_ids_for_daily_alert(target_offset: int) -> list:
 
 
 def get_user_importance_settings(db, user_id: int) -> list:
+    """Return the list of user's importance settings. 
+    For example [-1, 0, 1] if user's importance settings are set to show low, medium and high.
+    [1] is only for high importances."""
     user_settings = db.get(UserSettings, user_id)
 
     importance = [
@@ -185,35 +200,31 @@ def get_user_importance_settings(db, user_id: int) -> list:
     return importance
 
 
-async def hourly_alert_dispatcher():
+async def morning_alert_dispatcher():
     """
-    Запускается каждый час в :00 минут.
-    Вычисляет, в каком часовом поясе сейчас 8:00 утра, и делает по ним рассылку.
+    Start every hour at :00 minutes.
+    Calculates the GMT time for the hour of 8:00. A
     """
     now_utc = datetime.now(timezone.utc)
     current_utc_hour = now_utc.hour
     current_date = now_utc.date()
     
-    # Целевое время для отправки
-    TARGET_HOUR = 8
+    TARGET_HOUR = 10
     
-    # Вычисляем, для какого timezone_offset сейчас наступило TARGET_HOUR
-    # Формула: Offset = Target - Current_UTC
-    # Пример: Если в UTC сейчас 5 утра, то 8 утра сейчас там, где offset = 8 - 5 = 3 (UTC+3)
-    target_offset = TARGET_HOUR - current_utc_hour
+    # Calculate GMT, where TARGET HOUR is right now
+    gmt = TARGET_HOUR - current_utc_hour
     
-    # Корректируем под 24-часовой формат (если offset уходит в минус или больше 12)
-    if target_offset > 12:
-        target_offset -= 24
-    elif target_offset <= -12:
-        target_offset += 24
+    if gmt > 12:
+        gmt -= 24
+    elif gmt <= -12:
+        gmt += 24
 
-    logging.info(f"Инициализация рассылки. Время UTC: {current_utc_hour:02d}:00. Ищем пользователей с UTC{target_offset:+d}")
+    logging.info(f"Initialize daily alert. UTC time: {current_utc_hour:02d}:00. Search for users with UTC{gmt:+d}")
 
-    # Получаем из БД только тех, у кого включены уведомления И чей часовой пояс совпал
-    users_to_alert = get_user_ids_for_daily_alert(target_offset)
+    # Get users with UTC offset equal to target_offset and check if they are subscribed on daily alerts
+    users_to_alert = get_user_ids_for_daily_alert(gmt)
 
-    # Get events
+    # If there are users to alert, proceed with the process
     if len(users_to_alert) > 0:
         db = SessionLocal()
         today_events = get_events_for_date(current_date)
@@ -226,7 +237,7 @@ async def hourly_alert_dispatcher():
                 today_events = today_events[today_events["importance"].isin(importance)]
 
                 if not today_events.empty:
-                    message = "☀️ Доброе утро! Дневная сводка. Ниже список событий на сегодня. \n" + \
+                    message = "☀️ Good morning! Here is the daily update. Below is a list of today's events. \n\n" + \
                         "\n".join(_format_high_impact_event_html(ev, tz) for _, ev in today_events.iterrows())
 
                     try:
@@ -239,17 +250,17 @@ async def hourly_alert_dispatcher():
                         await asyncio.sleep(0.1)
                     
                     except Exception as e:
-                        logging.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+                        logging.error(f"Failed to send notification to user {user_id}: {e}")
 
             else:
-                message = "☀️ Доброе утро! Дневная сводка: Сегодня нет событий, соответствующих вашим фильтрам по важности."
+                message = "☀️ Good morning! Here is the daily summary. No events match your importance filters for today."
                 await bot.send_message(chat_id=user_id, text=message)
                 continue
 
 
-# +=====================================+
-#           SCHEDULER FOR EVENTS        |
-# +=====================================+
+# +===============================================================+
+#          SET SCHEDULER TO CHECK THE MARKET BEFORE EVENT         |
+# +===============================================================+
 
 def _reschedule_tomorrow_ml_jobs(scheduler: AsyncIOScheduler) -> None:
     """
@@ -263,6 +274,7 @@ def _reschedule_tomorrow_ml_jobs(scheduler: AsyncIOScheduler) -> None:
     for job in scheduler.get_jobs():
         if job.id.startswith("ml_before_event_"):
             scheduler.remove_job(job.id)
+
     # Add new jobs for tomorrow
     for t in _get_next_event_times_minus_1h():
         scheduler.add_job(
@@ -278,26 +290,15 @@ async def daily_summary_dispatcher():
     This function is intended to be scheduled to run once per day (e.g., at 00:00 UTC).
     It will reschedule the one-off ML prediction jobs for tomorrow's events.
     """
+    db = DBHandler()
+    db.update_events()
     _reschedule_tomorrow_ml_jobs(scheduler)
-
-
-@dp.message(Command("show_jobs"))
-async def show_jobs(message: types.Message):
-    jobs = scheduler.get_jobs()
-    if not jobs:
-        await message.answer("Нет запланированных задач.")
-        return
-
-    job_list = []
-    for job in jobs:
-        job_list.append(f"ID: {job.id}, Next Run: {job.next_run_time}, Trigger: {job.trigger}")
-
-    await message.answer("\n".join(job_list))
 
 
 # +=====================================+
 # |            SET TIMEZONE             |
 # +=====================================+
+
 
 def build_tz_keyboard() -> InlineKeyboardMarkup:
     buttons = [
@@ -305,20 +306,8 @@ def build_tz_keyboard() -> InlineKeyboardMarkup:
         for label, offset in TZ_OPTIONS
     ]
     rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    rows.append([InlineKeyboardButton(text="✏️ Другой / ввести вручную", callback_data="tz_manual")])
+    rows.append([InlineKeyboardButton(text="✏️ Another / Enter manually", callback_data="tz_manual")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-@dp.message(CommandStart())
-async def start(message: types.Message, state: FSMContext):
-    intro_text = (
-        "👋 Привет! Я бот для отслеживания волатильности на Forex.\n\n"
-        "Я слежу за основными парами USD и сигнализирую о потенциальном "
-        "хаосе на рынке за час до важных макро-событий (NFP, решения по ставке и т.д.)\n\n"
-        "Чтобы присылать тебе алерты в правильное локальное время, "
-        "укажи свой часовой пояс с помощью команды /set_gmt"
-    )
-    await message.answer(intro_text, reply_markup=build_buttons())
 
 
 @dp.message(Command("set_gmt"))
@@ -328,14 +317,14 @@ async def set_gmt(message: types.Message, state: FSMContext):
     if settings is not None and settings.user_timezone is not None:
         sign = "+" if settings.user_timezone >= 0 else ""
         await message.answer(
-            f"Текущий часовой пояс: UTC{sign}{settings.user_timezone}\n\n"
-            "Если хочешь изменить его, выбери из списка или введи вручную:",
+            f"Current time zone: UTC{sign}{settings.user_timezone}\n\n"
+            "If you want to change it, select from the list or enter manually:",
             reply_markup=build_tz_keyboard()
         )
         await state.set_state(OnboardingStates.waiting_for_timezone)
     else:
         await message.answer(
-            "Выбери свой часовой пояс из списка или введи вручную:",
+            "Select your time zone from the list or enter manually:",
             reply_markup=build_tz_keyboard()
         )
         await state.set_state(OnboardingStates.waiting_for_timezone)
@@ -345,16 +334,15 @@ async def set_gmt(message: types.Message, state: FSMContext):
 async def tz_manual_requested(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.edit_text(
-        "Введи свой часовой пояс числом относительно UTC.\n"
-        "Например: 3, -5, 5.5 (для UTC+5:30)\n\n"
-        "Диапазон: от -12 до +14"
+        "Enter your time zone as a number relative to UTC.\n"
+        "For example: 3, -5, 5.5 (for UTC+5:30)\n\n"
+        "Range: from -12 to +14"
     )
     await state.set_state(OnboardingStates.waiting_for_timezone)
 
 
 @router.callback_query(F.data.startswith("tz_"), OnboardingStates.waiting_for_timezone)
 async def tz_button_chosen(callback: CallbackQuery, state: FSMContext):
-    # tz_manual уже отработал выше, сюда попадают только числовые tz_<offset>
     offset = float(callback.data.split("_")[1])
 
     await save_timezone(callback.from_user.id, offset)  # твоя функция сохранения в БД
@@ -363,8 +351,8 @@ async def tz_button_chosen(callback: CallbackQuery, state: FSMContext):
     sign = "+" if offset >= 0 else ""
     await callback.answer()
     await callback.message.edit_text(
-        f"✅ Часовой пояс установлен: UTC{sign}{offset}\n\n"
-        f"Теперь я буду присылать алерты с учётом твоего локального времени."
+        f"✅ Time zone set: UTC{sign}{offset}\n\n"
+        f"Now I will send you alerts based on your local time."
     )
 
 
@@ -376,7 +364,7 @@ async def tz_text_input(message: Message, state: FSMContext):
         if not -12 <= offset <= 14:
             raise ValueError
     except ValueError:
-        await message.answer("⚠️ Не понял. Введи число от -12 до +14, например: 3 или -4.5")
+        await message.answer("⚠️ Didn't understand. Enter a number from -12 to +14, for example: 3 or -4.5")
         return
 
     await save_timezone(message.from_user.id, offset)  # твоя функция сохранения в БД
@@ -384,8 +372,8 @@ async def tz_text_input(message: Message, state: FSMContext):
 
     sign = "+" if offset >= 0 else ""
     await message.answer(
-        f"✅ Часовой пояс установлен: UTC{sign}{offset}\n\n"
-        f"Теперь я буду присылать алерты с учётом твоего локального времени."
+        f"✅ Time zone set: UTC{sign}{offset}\n\n"
+        f"Now I will send you alerts based on your local time."
     )
 
 
@@ -582,6 +570,19 @@ async def help_(message: types.Message):
 async def show_settings(message: types.Message):
     await message.answer("Not realized yet. Use /set_alerts or /set_gmt to configure your settings.")
 
+
+@dp.message(Command("show_jobs"))
+async def show_jobs(message: types.Message):
+    jobs = scheduler.get_jobs()
+    if not jobs:
+        await message.answer("Нет запланированных задач.")
+        return
+
+    job_list = []
+    for job in jobs:
+        job_list.append(f"ID: {job.id}, Next Run: {job.next_run_time}, Trigger: {job.trigger}")
+
+    await message.answer("\n".join(job_list))
 
 # +=====================================+
 # |               SUMMARY               |
@@ -875,7 +876,7 @@ async def test_check_the_market(message: types.Message):
 
 
 def get_user_ids_for_chaos_predictions() -> list:
-    """Return the list of user ids, that should get daily alerts at specific time"""
+    """Return the list of user ids, that subscribed on chaos predictions alerts"""
     db = SessionLocal()
     try:        
         stmt = select(UserSettings.user_id).where(UserSettings.chaos_alerts == True)
@@ -898,11 +899,7 @@ async def scheduled_check_the_market() -> None:
         predictor = FxRangePredictor()
 
         # Preparing Events
-        now = _utc_now()
-        events = db.get_events_for_range(
-            start=now - timedelta(days=2),
-            end=now + timedelta(days=2)
-        )
+        events = db.get_events_for_next_hour()
         events['rounded_time'] = events['date'].apply(lambda x: x.floor('1h'))
         agg_events = predictor.event_transformer.transform(events)
         agg_events = agg_events.iloc[[-2], :]
@@ -913,6 +910,7 @@ async def scheduled_check_the_market() -> None:
         agg_prices_latest = agg_prices.groupby('ticker').tail(1)
 
         # Unite all together
+        db.update_prices()
         df = agg_prices_latest.merge(agg_events, how='cross')
         df = db.add_ranges_for_each_event(df)
         FEATURES = [i for i in df.columns if i not in ['time', 'time_to_check', 'rounded_time', 'datetime', 'open', 'high', 'low', 'close']]
@@ -929,7 +927,6 @@ async def scheduled_check_the_market() -> None:
 
         # Get events
         if len(users_to_alert) > 0 and predictions is not None:
-            # db = SessionLocal()
             text = formulate_prediction_message(events, agg_events, predictions)
     
             for user_id in users_to_alert:
@@ -942,8 +939,7 @@ async def scheduled_check_the_market() -> None:
                     )
                     await asyncio.sleep(0.1)
                 except Exception as e:
-                    logging.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
-
+                    logging.error(f"Can't send message to user {user_id}: {e}")
 
     except Exception as e:
         logging.exception('Error in scheduled_check_the_market: %s', e)
@@ -1112,6 +1108,7 @@ def formulate_prediction_message(events: pd.DataFrame, agg_events: pd.DataFrame,
     else:
         return "No alerts."
 
+
 async def send_predictions(
         events: pd.DataFrame, 
         agg_events: pd.DataFrame,
@@ -1243,20 +1240,31 @@ async def echo(message: types.Message):
 
 # +---------- RUN BOT -----------------+
 async def main():
+    # Weekly scheduled job to update the database with new events from the source
     scheduler.add_job(
-        hourly_alert_dispatcher,
+        weekly_scheduler_job,
+        CronTrigger(day_of_week="sun", hour=18, minute=0, timezone=timezone.utc),
+        id="weekly_update_sun_1800_utc",
+        replace_existing=True,
+    )
+
+    # Every hour runs a function to send daily summary to users who subscribed on daily alerts
+    scheduler.add_job(
+        morning_alert_dispatcher,
         trigger="cron",
         day_of_week='mon-fri',
         hour="*",
         minute=0
     )
 
+    # Every day at 23:59 UTC runs a function to set schedulers on next day for users who subscribed on chaos alerts (ML)
     scheduler.add_job(
         daily_summary_dispatcher,
-        trigger=CronTrigger(hour=20, minute=17, timezone=timezone(timedelta(hours=3))),
+        trigger=CronTrigger(hour=23, minute=59, timezone=timezone(timedelta(hours=0))),
         id="daily_summary_dispatcher",
         replace_existing=True,
     )
+    await daily_summary_dispatcher() # Run once at startup to ensure the next day's jobs are scheduled
     
     scheduler.start()
 
