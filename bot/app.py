@@ -548,34 +548,33 @@ async def set_alerts(message: types.Message, state: FSMContext):
 @dp.message(Command('help'))
 async def help_(message: types.Message):
     await message.answer("""
-<b>Доступные команды:</b>
-/start - Запустить бот
-/help - вызвать help
-/set_alerts - настроить уведомления
-/set_importance - настроить фильтры важности событий
-/set_gmt - настроить часовой пояс
-/settings - пользовательские настройки
-/today_summary - события на сегодня
-/tomorrow_summary - события на завтра
-/weekly_summary - события на неделю
-/statistics - показать общую статистику по событиям
-/set_language - выбрать язык / set language
+<b>Available commands:</b>
+/start - Start the bot
+/help - Call help
+/set_alerts - Configure notifications
+/set_importance - Configure importance filters
+/set_gmt - Configure time zone
+/set_importance - Configure importance filters
+/today_summary - events for today
+/tomorrow_summary - events for tomorrow
+/weekly_summary - events for the week
+/statistics - show overall event statistics
 /test_check_the_market - Check the market now with closest events and current prices (FOR TEST)
 """,
         parse_mode=ParseMode.HTML
     )
 
 
-@dp.message(Command('settings'))
-async def show_settings(message: types.Message):
-    await message.answer("Not realized yet. Use /set_alerts or /set_gmt to configure your settings.")
+# @dp.message(Command('settings'))
+# async def show_settings(message: types.Message):
+#     await message.answer("Not realized yet. Use /set_alerts or /set_gmt to configure your settings.")
 
 
 @dp.message(Command("show_jobs"))
 async def show_jobs(message: types.Message):
     jobs = scheduler.get_jobs()
     if not jobs:
-        await message.answer("Нет запланированных задач.")
+        await message.answer("No scheduled jobs.")
         return
 
     job_list = []
@@ -604,7 +603,7 @@ def _utc_calendar_day_bounds(when: datetime) -> tuple[datetime, datetime]:
     day_start = datetime.combine(d, datetime.min.time())
     return day_start, day_start + timedelta(days=1)
 
-# ────────────────────────── Часовой пояс ────────────────────────────────────────────────
+# ────────────────────────── Time Zone ────────────────────────────────────────────────
 
 def get_user_timezone(db, user_id: int) -> timezone:
     settings = db.get(UserSettings, user_id)
@@ -621,7 +620,7 @@ def _to_user_tz(when: datetime, tz: timezone) -> datetime:
     return when.replace(tzinfo=timezone.utc).astimezone(tz) if when.tzinfo is None else when.astimezone(tz)
 
 
-# ────────────────────────── Форматирование события ──────────────────────────────────────
+# ────────────────────────── Event Formatting ──────────────────────────────────────
 
 def _esc(value) -> str:
     return html_escape(str(value)) if value is not None else "N/A"
@@ -668,7 +667,7 @@ def _chunk_telegram_html(text: str, limit: int = 4000) -> list[str]:
     return chunks
 
 
-# ────────────────────────── Дневная сводка ───────────────────────────────────────────────
+# ────────────────────────── Daily Summary ───────────────────────────────────────────────
 
 def get_events_for_date(requested_date: date) -> pd.DataFrame:
     """Return all events for specified date as a dataframe"""
@@ -736,7 +735,7 @@ async def tomorrow_summary(message: types.Message):
     await _send_daily_summary_answer(message, day=_utc_now() + timedelta(days=1), empty_label="tomorrow")
 
 
-# ────────────────────────── Недельная сводка ─────────────────────────────────────────────
+# ────────────────────────── Weekly Summary ─────────────────────────────────────────────
 
 @dp.message(Command("weekly_summary"))
 async def weekly_summary(message: types.Message):
