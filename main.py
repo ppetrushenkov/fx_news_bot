@@ -1,8 +1,6 @@
 import asyncio
-import os
 
 from bot.app import main as start_bot
-from bot.scheduler import set_schedulers
 from bot.blocks import create_block, update_block
 
 from rich.traceback import install
@@ -27,10 +25,6 @@ async def main():
     # Block 2: Update data
     update_block()
     print("\n[INFO] Update block completed")
-
-    # Block 3: Setup schedulers
-    # set_schedulers()
-    # print("\n[INFO] Schedulers started")
 
     # Block 3: Start bot
     await start_bot()

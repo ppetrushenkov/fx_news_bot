@@ -1,15 +1,15 @@
 # from numpy import integer
 from sqlalchemy import (
-    Column, 
-    Integer, 
-    Numeric, 
-    String, 
-    Boolean, 
-    Float, 
-    DateTime, 
-    Time, 
-    ForeignKey, 
-    UniqueConstraint
+    Column,
+    Integer,
+    Numeric,
+    String,
+    Boolean,
+    Float,
+    DateTime,
+    Time,
+    ForeignKey,
+    UniqueConstraint, Date
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -67,6 +67,22 @@ class Prices(Base):
     )
 
 
+class DailyPrices(Base):
+    __tablename__ = 'daily_prices'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    datetime = Column(DateTime, nullable=False)
+    ticker = Column(String, nullable=False)
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+
+    __table_args__ = (
+        UniqueConstraint("datetime", "ticker", name="uq_prices_datetime_ticker"),
+    )
+
+
 class Ranges(Base):
     """
     Stores realized future ranges after an event (computed from price bars).
@@ -98,13 +114,13 @@ class Ranges(Base):
 
 class Predictions(Base):
     __tablename__ = 'predictions'
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     rounded_date = Column(DateTime)
     ticker = Column(String)
     trg_future_range_1h = Column(String)  # Will be stored as string splitted with "-" like "54 - 76"
-    trg_future_range_3h = Column(String) 
-    trg_future_range_6h = Column(String) 
+    trg_future_range_3h = Column(String)
+    trg_future_range_6h = Column(String)
     trg_future_range_24h = Column(String)
     trg_future_overall_range_1h = Column(String)
     trg_future_overall_range_3h = Column(String)
@@ -145,19 +161,6 @@ class UserSettings(Base):
     show_high_importance = Column(Boolean, default=True)
 
     # --- ML risk settings ---
-    ml_risk_level = Column(String, default="conservative")  # can be "conservative", "medium", or "aggressive"
+    ml_risk_level = Column(String, default="base")  # can be "conservative", "medium", or "aggressive"
 
     updated_at = Column(DateTime, default=func.now())
-
-
-# class UserSubscriptions(Base):
-#     __tablename__ = 'user_subscriptions'
-    
-#     id = Column(Integer, primary_key=True, autoincrement=True)
-#     user_id = Column(Integer, unique=True)
-#     chat_id = Column(Integer)
-#     subscribed_to_alerts = Column(Boolean, default=True)
-#     subscribed_to_daily_summary = Column(Boolean, default=False)
-#     user_tz = Column(String, default='Etc/UTC')
-#     created_at = Column(DateTime, default=func.now())
-
