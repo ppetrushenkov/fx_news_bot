@@ -16,3 +16,4 @@ notebooks/*
 models/*
 .aider*
 *.csv
+/trash/
