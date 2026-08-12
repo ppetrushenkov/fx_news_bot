@@ -50,7 +50,7 @@ Settings:
 /set_alerts - Configure notifications
 /set_importance - Configure importance filters
 /set_gmt - Configure time zone
-/set_importance - Configure importance filters
+/set_risk - Configure risk level
 
 Summary:
 /today_summary - events for today
