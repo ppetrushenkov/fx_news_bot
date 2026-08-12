@@ -1,3 +1,5 @@
+from typing import Literal
+
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
@@ -25,18 +27,26 @@ from ml.targets import set_targets
 class EventPreprocessingTransformer(BaseEstimator, TransformerMixin):
     cols_to_onehot = ['category', 'currency', 'country', 'source', 'stage_release', 'calc_period', 'scale', 'mie']
 
-    def __init__(self, dt_crop_method: str = '1st'):
+    def __init__(self, dt_crop_method: str = '1st', round_method: Literal['hourly', 'daily', 'weekly'] = 'hourly'):
         self.onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
         self.dt_crop_method = dt_crop_method
         self.final_columns_ = None
+        self.round_method = round_method if round_method is not None else 'hourly'
 
     def _crop_time(self, X: pd.DataFrame) -> pd.DataFrame:
-        if self.dt_crop_method == '1st':
-            X['date'] = pd.to_datetime(X['date'], utc=True)
-            X['rounded_time'] = X['date'].apply(lambda x: x.floor('1h'))
-        elif self.dt_crop_method == '2nd':
-            X['date'] = pd.to_datetime(X['date'], utc=True)
-            X['rounded_time'] = X['date'].apply(lambda x: floor_or_ceil(x, freq='h'))
+        X['date'] = pd.to_datetime(X['date'], utc=True)
+
+        if self.round_method == 'hourly':
+            if self.dt_crop_method == '1st':
+                X['rounded_time'] = X['date'].apply(lambda x: x.floor('1h'))
+            elif self.dt_crop_method == '2nd':
+                X['rounded_time'] = X['date'].apply(lambda x: floor_or_ceil(x, freq='h'))
+
+        elif self.round_method == 'daily':
+            X['rounded_time'] = pd.to_datetime(X['date'].dt.date)
+
+        elif self.round_method == 'weekly':
+            X['rounded_time'] = X['date'].to_period('W').dt.start_time
 
         return X
 
@@ -84,7 +94,13 @@ class EventPreprocessingTransformer(BaseEstimator, TransformerMixin):
         events_features = self._crop_time(events_features)
 
         agg_events = aggregate_events(events_features, dt_col='rounded_time')
-        agg_events['time_to_check'] = agg_events['rounded_time'] - pd.Timedelta(hours=1)
+
+        if self.round_method == 'hourly':
+            agg_events['time_to_check'] = agg_events['rounded_time'] - pd.Timedelta(hours=1)
+
+        elif self.round_method == 'daily':
+            # agg_events['time_to_check'] = agg_events['rounded_time'] - pd.Timedelta(days=1)
+            agg_events['time_to_check'] = agg_events['rounded_time'] - pd.offsets.BDay(1)
 
         return agg_events
 
@@ -102,10 +118,11 @@ class EventPreprocessingTransformer(BaseEstimator, TransformerMixin):
 
 
 class PricePreprocessingTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, period: int = 21, drop_raw_cols: bool = False):
+    def __init__(self, period: int = 21, drop_raw_cols: bool = False, timeframe: Literal['hourly', 'daily'] = 'hourly'):
         self.period = period
         self.drop_raw_cols = drop_raw_cols
         self.final_columns_ = None
+        self.timeframe = timeframe
 
     def _preprocess(self, X: pd.DataFrame) -> pd.DataFrame:
 
@@ -116,7 +133,7 @@ class PricePreprocessingTransformer(BaseEstimator, TransformerMixin):
             raise ValueError("DataFrame must contain 'ticker' column.")
 
         X[['base_currency', 'quote_currency']] = get_base_and_quote_currency(X['ticker'].iloc[0])
-        prices = add_features(X, period=self.period)
+        prices = add_features(X, period=self.period, timeframe=self.timeframe)
 
         return prices
         
@@ -189,12 +206,6 @@ class DataMergerTransformer(BaseEstimator, TransformerMixin):
             raise ValueError("No matching time columns for merge")
             
         return merged
-
-
-class RangeTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self):
-        pass
-    # TODO: add ranges
 
 
 def get_full_preprocess_pipeline(train: bool = False):

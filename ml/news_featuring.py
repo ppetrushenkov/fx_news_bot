@@ -48,7 +48,7 @@ def extract_period(period):
         return None
 
 
-def extract_stage_release(title: pd.Series) -> pd.Series:
+def extract_stage_release(title: pd.Series) -> str | None:
     """Return 'Preliminary', 'Flash', 'Final' stage of release from the title."""
     title = str(title).upper()
     if 'PREL' in title:
@@ -60,7 +60,7 @@ def extract_stage_release(title: pd.Series) -> pd.Series:
     return None
 
 
-def extract_calculation_period(title: pd.Series) -> pd.Series:
+def extract_calculation_period(title: pd.Series) -> str | None:
     title = str(title).upper()
     if 'MOM' in title:
         return 'MoM'
@@ -69,10 +69,6 @@ def extract_calculation_period(title: pd.Series) -> pd.Series:
     if 'YOY' in title:
         return 'YoY'
     return None
-
-
-def get_report_period(ser: pd.Series):
-    pass
 
 
 def get_most_important_events(title: pd.Series):
@@ -167,7 +163,7 @@ def floor_or_ceil(x: str, freq: str='h'):
     """
     x_dt = pd.to_datetime(x)
     if freq == '30min':
-        if (29 >= x_dt.minute >= 20) or (59 >= x_dt.minute >= 50):  # TODO: May be change to last 5 minutes (20 -> 25 and 50 -> 55)
+        if (29 >= x_dt.minute >= 20) or (59 >= x_dt.minute >= 50):
             return x_dt.ceil(freq, ambiguous='NaT', nonexistent='shift_forward')
         else:
             return x_dt.floor(freq)

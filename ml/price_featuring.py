@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
@@ -216,7 +218,7 @@ def generate_smart_lags(df: pd.DataFrame, feature_name: str) -> pd.DataFrame:
     return res_df
 
 
-def add_features(data: pd.DataFrame, period: int = 21):
+def add_features(data: pd.DataFrame, period: int = 21, timeframe: Literal['hourly', 'daily'] = 'hourly'):
     data['datetime'] = pd.to_datetime(data['datetime'], utc=True)
 
     h, l, c = data["high"], data["low"], data["close"]
@@ -226,31 +228,30 @@ def add_features(data: pd.DataFrame, period: int = 21):
     data["atr_normalized"] = data["atr"] / data["close"]
     # atr = data["atr"]
 
-    # Daily data
-    daily_data = create_daily_data(data)
-    
-    # Daily range
-    daily_data['day_range_1'] = (daily_data['high'] - daily_data['low']).shift(1)
-    daily_data['day_range_2'] = (daily_data['high'] - daily_data['low']).shift(2)
-    daily_data['day_range_3'] = (daily_data['high'] - daily_data['low']).shift(3)
-    daily_data['day_range_4'] = (daily_data['high'] - daily_data['low']).shift(4)
-    
-    # Daily pct_change
-    daily_data['day_change_1'] = daily_data['close'].pct_change(1)
-    daily_data['day_change_2'] = daily_data['close'].pct_change(2)
-    daily_data['day_change_3'] = daily_data['close'].pct_change(3)
-    daily_data['day_change_4'] = daily_data['close'].pct_change(4)
-    
-    # Daily ATR
-    daily_data['prev_daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
+    if timeframe == 'hourly':
+        # Daily data
+        daily_data = create_daily_data(data)
 
-    # Merge daily data
-    # data = data.merge(daily_data[['datetime', 'prev_day_range', 'prev_daily_atr']], on='datetime', how='left')
-    data = data.merge(daily_data.drop(['open', 'high', 'low', 'close'], axis=1), on='datetime', how='left')
-    
-    # data[['prev_day_range', 'prev_daily_atr']] = data[['prev_day_range', 'prev_daily_atr']].ffill()
-    for c in ['day_range_1', 'day_range_2', 'day_range_3', 'day_range_4', 'day_change_1', 'day_change_2', 'day_change_3', 'day_change_4', 'prev_daily_atr']:
-        data[c] = data[c].ffill()
+        # Daily range
+        daily_data['day_range_1'] = (daily_data['high'] - daily_data['low']).shift(1)
+        daily_data['day_range_2'] = (daily_data['high'] - daily_data['low']).shift(2)
+        daily_data['day_range_3'] = (daily_data['high'] - daily_data['low']).shift(3)
+        daily_data['day_range_4'] = (daily_data['high'] - daily_data['low']).shift(4)
+
+        # Daily pct_change
+        daily_data['day_change_1'] = daily_data['close'].pct_change(1)
+        daily_data['day_change_2'] = daily_data['close'].pct_change(2)
+        daily_data['day_change_3'] = daily_data['close'].pct_change(3)
+        daily_data['day_change_4'] = daily_data['close'].pct_change(4)
+
+        # Daily ATR
+        daily_data['prev_daily_atr'] = ta.atr(daily_data['high'], daily_data['low'], daily_data['close'], period).shift(1)
+
+        # Merge daily data
+        data = data.merge(daily_data.drop(['open', 'high', 'low', 'close'], axis=1), on='datetime', how='left')
+
+        for c in ['day_range_1', 'day_range_2', 'day_range_3', 'day_range_4', 'day_change_1', 'day_change_2', 'day_change_3', 'day_change_4', 'prev_daily_atr']:
+            data[c] = data[c].ffill()
 
     # +---------------- Start featuring ---------------+
     # 1. Efficiency Ratio
@@ -272,7 +273,8 @@ def add_features(data: pd.DataFrame, period: int = 21):
     data = generate_smart_lags(data, 'zscore_atr')
 
     # 5. ATR Ratio
-    data["fast_vs_slow_atr"] = fast_vs_slow_atr(data['high'], data['low'], data['close'], fast_period=period, slow_period=100)
+    slow_period = 100 if timeframe == 'hourly' else period*2
+    data["fast_vs_slow_atr"] = fast_vs_slow_atr(data['high'], data['low'], data['close'], fast_period=period, slow_period=slow_period)
     data = generate_smart_lags(data, 'fast_vs_slow_atr')
     
     # 6. BB width
@@ -281,7 +283,8 @@ def add_features(data: pd.DataFrame, period: int = 21):
     data = generate_smart_lags(data, 'normalized_bb_width')
 
     # 7. Distance from SMA
-    data["distance_from_sma"] = distance_from_sma_normalized(data, period=240)
+    period_for_distance = 240 if timeframe == 'hourly' else period
+    data["distance_from_sma"] = distance_from_sma_normalized(data, period=period_for_distance)
     data = generate_smart_lags(data, 'distance_from_sma')
 
     # 8. ADX (+ DI spread для направленного давления перед новостью)
@@ -310,7 +313,7 @@ def add_features(data: pd.DataFrame, period: int = 21):
     data["parkinson_vol"] = pk
     data["parkinson_vol_over_atr"] = pk / (data["atr"] + 1e-9)
 
-    # 12. Режим ATR: короткий / длинный (сжатие vs расширение диапазона)
+    # 12. Short vs Long ATR. Diapason squeeze and expansion
     atr_short_len = max(2, period // 2)
     atr_long_len = max(period + 1, period * 2)
     atr_short = ta.atr(data['high'], data['low'], data['close'], atr_short_len)
@@ -335,80 +338,13 @@ def add_features(data: pd.DataFrame, period: int = 21):
     data['log_return'] = np.log(data['close'] / data['close'].shift(1))
 
     # 17. Sessions
-    session_data = data.apply(lambda row: get_trading_session(row['ticker'], row['hour'], row['month']), axis=1)
-    data['is_europe'] = session_data.apply(lambda x: x['europe'])
-    data['is_usa'] = session_data.apply(lambda x: x['usa'])
-    data['is_asia'] = session_data.apply(lambda x: x['asia'])
+    if timeframe == 'hourly':
+        session_data = data.apply(lambda row: get_trading_session(row['ticker'], row['hour'], row['month']), axis=1)
+        data['is_europe'] = session_data.apply(lambda x: x['europe'])
+        data['is_usa'] = session_data.apply(lambda x: x['usa'])
+        data['is_asia'] = session_data.apply(lambda x: x['asia'])
 
-    # 18. Sine time features
-    data['sin_hour'] = np.sin(data['hour'] * 2*np.pi/24)
+        # 18. Sine time features
+        data['sin_hour'] = np.sin(data['hour'] * 2*np.pi/24)
 
     return data
-
-# def get_target_range(data: pd.DataFrame, atr: pd.Series, future_n: int = 8) -> pd.Series:
-#     """Return range value in future 4 hours"""
-#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
-#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
-#     future_range = future_max - future_min
-#     return future_range / atr
-
-
-# def stopped_out_by_volatility_category(data, future_n: int = 8):  # 8 is 4 hours (8 bars in M30 timeframe)
-#     """Return the category of volatility.
-#     There is 5 levels of volatility:
-#     0 - no 24 bar min/max values was broke out simultaniously
-#     Returns a Series with values 0-4 indicating volatility category.
-#     """
-#     ranges = [24, 48, 96, 144]  # 'half_day', '1_day', '2_day', '3_day'
-    
-#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
-#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
-
-#     # Initialize result Series with zeros
-#     result = pd.Series(0, index=data.index)
-    
-#     levels = {
-#         24: 1,
-#         48: 2,
-#         96: 3,
-#         144: 4
-#     }
-
-#     # Check each range level, starting from smallest to largest
-#     # The largest matching range will overwrite previous values
-#     for v in ranges:
-#         prev_max_high = data['high'].rolling(v).max()
-#         prev_min_low = data['low'].rolling(v).min()
-        
-#         # Create boolean mask for rows where condition is True
-#         condition = (future_max > prev_max_high) & (future_min < prev_min_low)
-        
-#         # Update result for rows where condition is True
-#         result.loc[condition] = levels[v]
-    
-#     return result
-
-
-# def extremum_breakout(data: pd.DataFrame, channel_period: int, future_n: int) -> pd.Series:
-#     """Return boolean series if extremum breakout happened in future n hours"""
-#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
-#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
-#     return (future_max > data['close']) & (future_min < data['close'])
-
-
-# def atr_volatility_expansion(data, atr, stop_mult, future_n: int = 8):
-#     current_close = data['close']
-#     future_max = data['high'].shift(-future_n).rolling(future_n).max()
-#     future_min = data['low'].shift(-future_n).rolling(future_n).min()
-#     future_range = future_max - future_min
-
-#     # Find stop levels
-#     upper_stop = current_close + (atr * stop_mult)
-#     lower_stop = current_close - (atr * stop_mult)
-
-#     # Targets
-#     target_volatility_expantion = future_range > (atr * 3)
-#     target_whipsaw = (future_max > upper_stop) & (future_min < lower_stop)
-#     target_chaos = target_volatility_expantion | target_whipsaw
-#     return target_chaos.astype(int)
-

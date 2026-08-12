@@ -109,13 +109,23 @@ def get_future_range_from_now(data: pd.DataFrame, n_forward: int) -> pd.Series:
     return future_range
 
 
-def get_future_range_from_next_bar(data: pd.DataFrame, n_forward: int) -> pd.Series:
-    channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward-1)
-    if channel is None:
-        return pd.Series(np.nan, index=data.index)
-    channel.columns = ['lower', 'middle', 'upper']
-    future_range = channel['upper'] - channel['lower']
-    return future_range
+# def get_future_range_from_next_bar(data: pd.DataFrame, n_forward: int) -> pd.Series:
+#     channel = ta.donchian(data.high, data.low, lower_length=n_forward, upper_length=n_forward, offset=-n_forward-1)
+#     if channel is None:
+#         return pd.Series(np.nan, index=data.index)
+#     channel.columns = ['lower', 'middle', 'upper']
+#     future_range = channel['upper'] - channel['lower']
+#     return future_range
+
+
+def get_future_range(data: pd.DataFrame, n_forward: int) -> pd.Series:
+    rolling_high = data['high'].rolling(window=n_forward).max()
+    rolling_low = data['low'].rolling(window=n_forward).min()
+    
+    future_high = rolling_high.shift(-n_forward)
+    future_low = rolling_low.shift(-n_forward)
+    
+    return future_high - future_low
 
 
 def get_overall_future_range(data: pd.DataFrame, n_forward: int):
@@ -544,10 +554,10 @@ def set_targets(data: pd.DataFrame, look_forward_bars: int):
     # min_future_efficiency = er.shift(-look_forward_bars).rolling(look_forward_bars).min()
 
     # Volatility Ranges (TARGET #2)
-    future_range_1h = get_future_range_from_next_bar(data, n_forward=1)
-    future_range_3h = get_future_range_from_next_bar(data, n_forward=3)
-    future_range_6h = get_future_range_from_next_bar(data, n_forward=6)
-    future_range_24h = get_future_range_from_next_bar(data, n_forward=24)
+    future_range_1h = get_future_range(data, n_forward=1)
+    future_range_3h = get_future_range(data, n_forward=3)
+    future_range_6h = get_future_range(data, n_forward=6)
+    future_range_24h = get_future_range(data, n_forward=24)
 
     future_range_1h /= atr
     future_range_3h /= atr
