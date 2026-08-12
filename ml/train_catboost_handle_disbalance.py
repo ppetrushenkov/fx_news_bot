@@ -30,11 +30,11 @@ from dataclasses import dataclass
 import seaborn as sns
 
 
-# @dataclass
-# class BestThreshold:
-#     threshold: float
-#     precision: float
-#     recall: float
+@dataclass
+class BestThreshold:
+    threshold: float
+    precision: float
+    recall: float
 
 
 class SlidingQuarterBlockCV:
