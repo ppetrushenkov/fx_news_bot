@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from db.database import SessionLocal, create_tables
+from db.database import create_tables
 from db.data_handler import DBHandler
 
 
@@ -26,7 +26,8 @@ def update_block() -> None:
     db = DBHandler()
 
     db.update_events()
-    db.update_prices()
+    db.update_hourly_prices()
+    db.update_daily_prices()
     db.update_ranges()
     
     print('\n////////////////////////////////////')

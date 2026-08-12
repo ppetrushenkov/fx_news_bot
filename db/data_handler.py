@@ -8,31 +8,24 @@ from tqdm import tqdm
 
 from config import Config
 
-# from bot.app import start
-from bot.data_loader import get_economic_events, get_historical_prices
+from utils.utils import df_standardize_event_dates, df_standardize_prices
+from utils.text import get_most_important_events
+from utils.datetime_utils import utc_now
 
-from bot.feature_engineer import (
-    get_most_important_events, 
-    _utc_now, _next_sunday_utc, 
-    _df_standardize_event_dates,
-    _df_standardize_prices
-)
-
+from db.data_loader import get_economic_events, get_historical_prices, tiingo_get_historical_prices
 from db.database import SessionLocal
-from db.models import Events, Prices, Ranges
+from db.models import Events, Prices, Ranges, DailyPrices, Base
 
 from sqlalchemy import func, select, desc, case, extract
 from sqlalchemy.dialects.sqlite import insert
 
 from twelvedata import TDClient
 
-import numpy as np
 import pandas as pd
 
 from ml.event_categories import EVENT_WEIGHTS_D
 from ml.news_featuring import get_max_weight_event
 from ml.targets import get_future_range_from_now
-
 
 
 class DBHandler:
@@ -50,17 +43,28 @@ class DBHandler:
         self.supported_tickers = ['EUR/USD', 'GBP/USD', 'USD/CHF', 'USD/JPY', 'USD/CAD', 'AUD/USD', 'NZD/USD']
         self.days_for_new_dataset = 50
         self.prices_interval = '1h'
+        self.tiingo_api = Config.TIINGO_API
 
 # +---------------  WRITE  --------------------+ #
     def write_into(self, df: pd.DataFrame, table_name: str, if_exists: Literal['replace', 'append'] = 'replace'):
         """Write DataFrame to database."""
         try:
-            df.to_sql(table_name, self.sess.bind, if_exists=if_exists, index=False)
-            print(f"Added {len(df)} news items to database")
+            df.to_sql(
+                name=table_name,
+                con=self.sess.connection(),
+                if_exists=if_exists,
+                index=False,
+                method=sqlite_upsert_method
+            )
+            self.sess.commit()
+            print(f"Added {len(df)} new items to database")
 
         except Exception as e:
             print(f"Error populating database: {e}")
             self.sess.rollback()
+
+        finally:
+            self.sess.close()
 
 # +---------------  GET  --------------------+ #
     def get_events_for_range(self, start: datetime, end: datetime):
@@ -71,32 +75,17 @@ class DBHandler:
             )
         events = pd.read_sql(stmt, self.sess.bind)
         return events
-
-    # def get_events_for_next_hour(self) -> pd.DataFrame:
-    #     # 1. Calculate boundaries (Using timezone-aware UTC is best practice)
-    #     now = _utc_now()
-    #     one_hour_later = now + timedelta(hours=12)
-
-    #     # 2. Build the query
-    #     # This fetches records where the 'start_time' is between now and +1 hour
-    #     stmt = select(Events).where(
-    #         Events.date > now,
-    #         Events.date <= one_hour_later
-    #     )
-        
-    #     events = pd.read_sql_query(stmt, self.sess.connection())
-    #     return events
     
-    def get_last_prices(self, period: int):
-        is_weekday = extract('dow', Prices.datetime).notin_([0, 6])
+    def get_last_prices(self, table, period: int):
+        is_weekday = extract('dow', table.datetime).notin_([0, 6])
 
         window_func = func.row_number().over(
-            partition_by=Prices.ticker,
-            order_by=desc(Prices.datetime)
+            partition_by=table.ticker,
+            order_by=desc(table.datetime)
         ).label("row_num")
 
         subq = (
-            select(Prices, window_func)
+            select(table, window_func)
             .where(is_weekday)
             .subquery()
         )
@@ -107,13 +96,9 @@ class DBHandler:
         prices = prices.sort_values(by=['ticker', 'datetime'], ascending=[True, True])
         return prices
 
-    def get_ranges_for_each_event(
-        self,
-        windows: tuple[int, ...] = (5, 20),
-    ) -> pd.DataFrame:
+    def get_ranges_for_each_event(self, windows: tuple[int, ...] = (5, 20)) -> pd.DataFrame:
         """
-        For each (instrument, main_event) pair, calculate statistics using SQL window functions.
-        This is more efficient than loading all data into memory.
+        For each (instrument, main_event) pair, calculate statistics (min, avg and max ranges) using SQL window functions.
         """
         range_cols = {
             "future_range_1h": "1h",
@@ -171,7 +156,7 @@ class DBHandler:
             
         return df[col_order]
 
-    def add_ranges_for_each_event(self, event_x_prices: pd.DataFrame):
+    def add_last_ranges_for_each_event(self, event_x_prices: pd.DataFrame):
         """
         Add ranges for each event in ``event_x_prices``.
 
@@ -200,14 +185,14 @@ class DBHandler:
 # +---------------  UPDATE DATA  --------------------+ #
     def update_events(self):
         if self.sess.execute(select(Events)).first() is None:  # If no data in Events
-            start_datetime = _utc_now() - timedelta(days=self.days_for_new_dataset)
+            start_datetime = utc_now() - timedelta(days=self.days_for_new_dataset)
         else:
             q = select(func.max(Events.date))
             start_datetime = self.sess.execute(q).scalar()
             start_datetime = start_datetime.astimezone(timezone('UTC'))
 
         start_date = start_datetime.date()
-        end_date = _utc_now().date() + timedelta(days=7)  # Fetch events for the next week
+        end_date = utc_now().date() + timedelta(days=7)  # Fetch events for the next week
         # end_date = _next_sunday_utc()
 
         if start_date < end_date:
@@ -219,7 +204,7 @@ class DBHandler:
                 end_date=end_date_s,
                 countries=self.countries,
             )
-            events = _df_standardize_event_dates(events)
+            events = df_standardize_event_dates(events)
 
             if len(events) > 0:
                 events = events.to_dict(orient='records')
@@ -228,11 +213,11 @@ class DBHandler:
                 stmt = insert(Events).values(events)
                 on_conflict_stmt = stmt.on_conflict_do_nothing(
                     index_elements=["event_id"],
-                ) 
+                )
                 self.sess.execute(on_conflict_stmt)
                 self.sess.commit()
 
-                print("[UPDATE] Events lenght:", len(events))
+                print("[UPDATE] Events length:", len(events))
                 print("[UPDATE] Uploaded from:", start_date_s)
                 print("[UPDATE] Days uploaded:", days_delta)
                 print('[UPDATE] The events were populated (updated)')
@@ -240,9 +225,15 @@ class DBHandler:
             else:
                 print('[UPDATE] No need to update the Events table')
     
-    def update_prices(self):
+    def update_hourly_prices(self):
         print("[UPDATE] Populating prices...")
-        now = _utc_now()
+
+        last_datetime = self.sess.execute(select(func.max(Prices.datetime))).scalar()
+        now = utc_now().replace(minute=0, second=0, microsecond=0)
+    
+        if last_datetime.replace(tzinfo=None) >= now.replace(tzinfo=None):
+            print('[UPDATE] No need to update')
+            return
 
         if self.sess.execute(select(Prices)).first() is None:
             print("[UPDATE] No rows in table Prices. Populating data for the last 50 days...")
@@ -256,10 +247,12 @@ class DBHandler:
             start_date_dt += timedelta(hours=1)
 
         start_date_s = start_date_dt.strftime("%Y-%m-%d %H:%M:%S")
-        pbar = tqdm(self.supported_tickers, postfix="")
 
-        for ticker in pbar:
+        # Iterate through all tickers in self.supported_tickers
+        for ticker in (pbar := tqdm(self.supported_tickers, postfix="")):
             pbar.set_description(f"Processing {ticker} data")
+
+            # Get last date for ticker
             q = select(func.max(Prices.datetime)).where(Prices.ticker == ticker)
             last_date = self.sess.execute(q).scalar()
 
@@ -287,18 +280,64 @@ class DBHandler:
                 start_date=ticker_start_date,
                 interval=self.prices_interval,
             )
-            p = _df_standardize_prices(p, ticker)
+
+            p = df_standardize_prices(p, ticker)
             pbar.set_postfix({"status": "Write into the Prices table..."})
             self.write_into(p, Prices.__tablename__, "append")
             pbar.set_postfix({"status": "Completed. Sleep for 1 sec..."})
             sleep(1)
 
-        print("[UPDATE] Table Prices were populated.")
+        print("[UPDATE] Table Prices (hourly) were populated.")
         return None
+
+    def update_daily_prices(self):
+        print("[UPDATE] Populating daily prices...")
+
+        start_date_dt = None
+
+        # Define if we have daily prices at all
+        if self.sess.execute(select(DailyPrices)).first() is None:
+            print("[UPDATE] No rows in table DailyPrices")
+            start_date_dt = utc_now() - timedelta(days=self.days_for_new_dataset)
+
+        for ticker in (pbar := tqdm(self.supported_tickers)):
+            pbar.set_description(f"Processing {ticker} data")
+
+            # If DailyPrices table is not empty, find last date for each ticker
+            if start_date_dt is None:
+                start_date_dt = self.sess.execute(
+                    select(func.max(DailyPrices.datetime))
+                ).scalar()
+                start_date_dt += timedelta(days=1)
+
+            if start_date_dt.date() >= utc_now().date():
+                continue
+
+            print(start_date_dt)
+            start_date_s = start_date_dt.strftime("%Y-%m-%d")
+            print(start_date_s)
+
+            pbar.set_postfix({"status": "Downloading..."})
+            p = tiingo_get_historical_prices(
+                ticker, token=self.tiingo_api,
+                start_date=start_date_s,
+                resample_freq='1day',
+            )
+            p.rename(columns={"date": "datetime"}, inplace=True)
+            p['datetime'] = pd.to_datetime(p['datetime']).dt.tz_localize(None)
+            p = p[p['datetime'].dt.date < utc_now().date()]
+            print(p.head())
+
+            # p = df_standardize_prices(p, ticker)
+            pbar.set_postfix({"status": "Write into the Daily Prices table..."})
+            self.write_into(p, DailyPrices.__tablename__, "append")
+            pbar.set_postfix({"status": "Completed. Sleep for 1 sec..."})
+            sleep(1)
+
+        print("[UPDATE] Table Daily Prices were populated.")
 
     def update_ranges(self):
         print("[UPDATE] Populating event ranges...")
-        # TODO: Почему у некоторых событий future_range_1h, future_range_3h, future_range_6h, future_range_24h = NaN?
         # +================================+
         # 1. Get Events
         # +================================+
@@ -407,3 +446,27 @@ class DBHandler:
             self.sess.execute(stmt)
         self.sess.commit()
         print("[UPDATE] Ranges were populated")
+
+
+def sqlite_upsert_method(table, conn, keys, data_iter):
+    # 1. Convert incoming chunk data into a list of dictionaries
+    data = [dict(zip(keys, row)) for row in data_iter]
+    insert_stmt = insert(table.table).values(data)
+
+    # 2. Define the unique composite keys causing the conflict
+    conflict_keys = ['datetime', 'ticker']
+
+    # 3. Exclude conflict keys and 'id' from the update dictionary
+    update_dict = {
+        c.name: insert_stmt.excluded[c.name]
+        for c in table.table.columns
+        if c.name not in conflict_keys and c.name != 'id'
+    }
+
+    # 4. Pass the list of composite columns to index_elements
+    upsert_stmt = insert_stmt.on_conflict_do_update(
+        index_elements=conflict_keys,  # Looks for conflict on (datetime, ticker)
+        set_=update_dict
+    )
+
+    conn.execute(upsert_stmt)

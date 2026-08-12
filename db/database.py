@@ -15,10 +15,10 @@ def create_tables() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def get_db():
-    """Yield a database session (FastAPI-style helper)."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# def get_db():
+#     """Yield a database session (FastAPI-style helper)."""
+#     db = SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
