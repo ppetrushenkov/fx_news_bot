@@ -97,4 +97,6 @@ async def _send_daily_summary_answer(message: types.Message, *, day: datetime, e
         f"📅 Daily high-impact market summary ({report_day.isoformat()}):\n"
         f"\nHigh impact events count: {events_cnt}\n\n{summary}"
     )
-    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+    # await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+    for chunk in _chunk_telegram_html(text):
+        await message.answer(chunk, parse_mode="HTML", disable_web_page_preview=True)
