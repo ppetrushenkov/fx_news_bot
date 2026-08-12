@@ -28,7 +28,7 @@ A Telegram bot that warns FX traders **~1 hour before scheduled macro news event
 ## Architecture
  
 ```
-News (TradingView)  ─┐
+News (TradingView)   ─┐
                       ├──▶  Feature pipeline  ──▶  CatBoost models  ──▶  chaos_score / SFP / range / regime
 Prices (Twelve Data) ─┘              │
                                      ▼
