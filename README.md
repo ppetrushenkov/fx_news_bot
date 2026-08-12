@@ -164,88 +164,77 @@ Predictions to show:
 
 ---
 
-## Metrics
-### Total Future Range
-| Metric             | Horizon 1h | Horizon 3h | Horizon 6h | Horizon 24h |
-|:-------------------| :--- | :--- | :--- | :--- |
-| **pinball q0.1**   | 0.06251665479566325 | 0.10391680618080708 | 0.12360434035932567 | 0.1570744735573364 |
-| **pinball q0.5**   | 0.1873629355071192 | 0.2730939715008943 | 0.31498242235620993 | 0.3597971454383668 |
-| **pinball q0.9**   | 0.11177433379631857 | 0.13813715833913462 | 0.18221943389014125 | 0.249675241182079 |
-| **coverage q0.1**  | 0.1057542768273717 | 0.12716832156956573 | 0.15372652231128126 | 0.14295968417274793 |
-| **coverage q0.5**  | 0.4952745543725326 | 0.5201579136260318 | 0.5444431152051681 | 0.537983012322048 |
-| **coverage q0.9**  | 0.8902978825218327 | 0.8798899389879172 | 0.9090800334968298 | 0.9045340351716713 |
-| **interval width** | 1.085288738388673 | 1.6226423648402406 | 1.9075807472026038 | 2.1405049936391047 |
+## Model Metrics
+ 
+The bot relies on five models, each covering a different part of the forecast. Below: what each model predicts, key metrics, and honest limitations.
+ 
+### 1. Range Forecast (multi-quantile regression)
+ 
+Predicts the future price range (quantiles 0.1 / 0.5 / 0.9) across horizons from 1h to 24h.
+ 
+| Horizon | Pinball q0.5 | Interval width | Coverage q0.1 / q0.5 / q0.9 |
+|:---|:---|:---|:---|
+| 1h  | 0.187 | 1.09 | 10.6% / 49.5% / 89.0% |
+| 3h  | 0.273 | 1.62 | 12.7% / 52.0% / 88.0% |
+| 6h  | 0.315 | 1.91 | 15.4% / 54.4% / 90.9% |
+| 24h | 0.360 | 2.14 | 14.3% / 53.8% / 90.5% |
+ 
+Interval width grows with the horizon, which is expected — the model correctly widens its uncertainty over longer windows. 
+The median and upper quantile (q0.9) are calibrated close to their targets. 
 
+**Limitation:** the lower quantile (q0.1) is under-calibrated at longer horizons 
+(actual coverage 14–15% vs. the target 10%), meaning the lower bound gets breached more 
+often than it should — worth accounting for if alerts are built off the lower bound.
 
-### Direction Changes
+### 2. Direction Changes (ordinal regression on number of reversals)
+ 
 | Metric | Value |
-| :--- | :--- |
-| QWK (Quadratic Weighted Kappa) | 0.4135 |
-| MAE (Rounded Predictions) | 1.0498 |
-| MAE (Continuous Predictions) | 1.0722 |
-| RMSE (Rounded Predictions) | 1.3761 |
-| Exact Match Accuracy | 0.2801 |
-| Within-1 Accuracy | 0.7442 |
+|:---|:---|
+| QWK | 0.41 |
+| Within-1 Accuracy | 74.4% |
+| MAE (rounded) | 1.05 |
+ 
+This is an ordinal target, so exact-match accuracy isn't the metric that matters most. 
+A QWK of 0.41 reflects moderate agreement with ground truth, while a Within-1 
+Accuracy of 74% shows the prediction is almost always within one class of the actual 
+value — practically useful for ranking "calm / moderate / volatile" conditions.
 
-
-### Regime (Trend / Flat / None)
+### 3. Regime Classifier (Trend / Flat / None)
 #### 1 Day:
 ![regime_1_day_overall_confusion_matrix.png](imgs/regime_1_day_overall_confusion_matrix.png)
-
-| Class Label | Precision | Recall | F1-Score | Support |
-| :---        | :---      | :---   | :---     |    :--- |
-| Flat | 0.5849412671 | 0.8187601078 | 0.6823767269 | 18550 |
-| None | 0.8684860459 | 0.5936022957 | 0.7052040509 | 47392 |
-| Trend | 0.4147376543 | 0.8095895569 | 0.548492708 | 7967 |
 
 #### 2 Days:
 ![regime_2_days_overall_confusion_matrix.png](imgs/regime_2_days_overall_confusion_matrix.png)
 
-| Class Label | Precision | Recall | F1-Score | Support |
-| :--- | :--- | :--- | :--- | :--- |
-| Flat | 0.5018034145 | 0.6274051309 | 0.5576189416 | 29936 |
-| None | 0.5051109617 | 0.2496758967 | 0.3341712455 | 30083 |
-| Trend | 0.3266543267 | 0.5082073434 | 0.3976901408 | 13890 |
 
-### Noise targets
-### Swing Failure Pattern
+| Horizon | Trend F1 | Flat F1 | None F1 |
+|:---|:---|:---|:---|
+| 1 day  | 0.55 | 0.68 | 0.71 |
+| 2 days | 0.40 | 0.56 | 0.33 |
+ 
+At the 1-day horizon the model performs reliably: recall for Trend/Flat is high (0.81–0.82) — 
+it favors not missing a potential regime shift over precision. At 2 days, quality drops noticeably, 
+especially for the None class (recall 0.25). **This horizon should be flagged as experimental** and 
+not relied on as a primary signal until it's retrained.
 
-| Name | Threshold | PR-AUC | ROC-AUC | Brier Score | Log Loss | F0.5 | F1 | F2 | F3 | Precision | Recall | Base Rate |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| best_f0.5 | 0.8747533895 | 0.3810180706 | 0.8755308942 | 0.1408329453 | 0.4258222505 | 0.4471371277 | 0.3526244953 | 0.2910949392 | 0.2750944981 | 0.5444155844 | 0.2607613834 | 0.0543776807 |
-| best_f1 | 0.7818015112 | 0.3810180706 | 0.8755308942 | 0.1408329453 | 0.4258222505 | 0.385959005 | 0.4096493187 | 0.4364380563 | 0.4461635771 | 0.3716312057 | 0.456332421 | 0.0543776807 |
-| best_f2 | 0.629072507 | 0.3810180706 | 0.8755308942 | 0.1408329453 | 0.4258222505 | 0.2735503951 | 0.351924077 | 0.4932400423 | 0.5694631437 | 0.2381874175 | 0.6735506345 | 0.0543776807 |
-| best_f3 | 0.5012070017 | 0.3810180706 | 0.8755308942 | 0.1408329453 | 0.4258222505 | 0.2111920677 | 0.2918738136 | 0.4723107978 | 0.5949003279 | 0.1783288231 | 0.80343369 | 0.0543776807 |
+### 4. Binary "noise" targets (Swing Failure Pattern, Double Extremum Breakout, Big Spike, Chaos)
+ 
+All four are rare events (base rate 3.7–15.3%), so ROC-AUC alone isn't very informative — the more telling number is PR-AUC lift over the base rate.
+ 
+| Target | Base rate | ROC-AUC | PR-AUC | Lift over base rate | best-F1 Precision / Recall |
+|:---|:---|:---|:---|:---|:---|
+| Double Extremum Breakout | 3.7% | 0.90 | 0.26 | ~7x | 0.28 / 0.46 |
+| Swing Failure Pattern | 5.4% | 0.88 | 0.38 | ~7x | 0.37 / 0.46 |
+| Chaos (24h) | 13.0% | 0.85 | 0.48 | ~3.7x | 0.43 / 0.58 |
+| Big Spike | 15.3% | 0.74 | 0.33 | ~2.1x | 0.27 / 0.70 |
+ 
+Double Extremum and SFP show the strongest discrimination relative to random guessing (~7x lift), 
+and Chaos offers the best-balanced precision/recall of the four. 
+**Big Spike is the weakest model in the group** (ROC-AUC 0.74, only a 2.1x lift), 
+and either needs further work or should carry less weight in the combined chaos_score / alerting logic.
 
-
-### Double Extremum Breakout
-
-| Name | Threshold | PR-AUC | ROC-AUC | Brier Score | Log Loss | F0.5 | F1 | F2 | F3 | Precision | Recall | Base Rate |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| best_f0.5 | 0.847585 | 0.258275 | 0.899663 | 0.1252 | 0.375324 | 0.323394 | 0.329060 | 0.334928 | 0.336931 | 0.319723 | 0.338958 | 0.036883 |
-| best_f1 | 0.803244 | 0.258275 | 0.899663 | 0.1252 | 0.375324 | 0.305237 | 0.348593 | 0.406305 | 0.430037 | 0.281866 | 0.456713 | 0.036883 |
-| best_f2 | 0.695059 | 0.258275 | 0.899663 | 0.1252 | 0.375324 | 0.245248 | 0.320594 | 0.462767 | 0.543040 | 0.212028 | 0.657007 | 0.036883 |
-| best_f3 | 0.583728 | 0.258275 | 0.899663 | 0.1252 | 0.375324 | 0.199692 | 0.276993 | 0.451939 | 0.572459 | 0.168368 | 0.780631 | 0.036883 |
-
-
-### Big Spike
-
-| Name | Threshold | PR-AUC | ROC-AUC | Brier Score | Log Loss | F0.5 | F1 | F2 | F3 | Precision | Recall | Base Rate |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| best_f0.5 | 0.653579 | 0.329347 | 0.736786 | 0.214357 | 0.609275 | 0.355251 | 0.362060 | 0.369135 | 0.371555 | 0.350853 | 0.374007 | 0.153351 |
-| best_f1 | 0.504404 | 0.329347 | 0.736786 | 0.214357 | 0.609275 | 0.310135 | 0.392176 | 0.533235 | 0.605876 | 0.272176 | 0.701429 | 0.153351 |
-| best_f2 | 0.390373 | 0.329347 | 0.736786 | 0.214357 | 0.609275 | 0.248067 | 0.340212 | 0.541267 | 0.674049 | 0.210125 | 0.893153 | 0.153351 |
-| best_f3 | 0.312989 | 0.329347 | 0.736786 | 0.214357 | 0.609275 | 0.231902 | 0.323462 | 0.534495 | 0.683036 | 0.195087 | 0.945915 | 0.153351 |
-
-
-### Chaos (horizon 24 hour)
-
-| Name | Threshold | PR-AUC | ROC-AUC | Brier Score | Log Loss | F0.5 | F1 | F2 | F3 | Precision | Recall | Base Rate |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| best_f0.5 | 0.811133 | 0.478817 | 0.854502 | 0.164369 | 0.480837 | 0.496459 | 0.433001 | 0.383928 | 0.369952 | 0.550216 | 0.356957 | 0.130201 |
-| best_f1 | 0.697565 | 0.478817 | 0.854502 | 0.164369 | 0.480837 | 0.453062 | 0.492768 | 0.540102 | 0.557967 | 0.429965 | 0.577055 | 0.130201 |
-| best_f2 | 0.482814 | 0.478817 | 0.854502 | 0.164369 | 0.480837 | 0.345395 | 0.442261 | 0.614636 | 0.706412 | 0.301388 | 0.830406 | 0.130201 |
-| best_f3 | 0.309924 | 0.478817 | 0.854502 | 0.164369 | 0.480837 | 0.283261 | 0.383313 | 0.592644 | 0.724535 | 0.241276 | 0.931934 | 0.130201 |
+The operating threshold per model is chosen for the use case: `best_f0.5` when false alerts are costlier, 
+`best_f2`/`best_f3` when missing an event is costlier (you can set the risk level using the command `/set_risk`).
 
 ---
 ## Setup
